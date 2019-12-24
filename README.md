@@ -1,4 +1,4 @@
-# Changes for supporting c++ excpetions not based on the seh mechainsm in windows.
+# Changes for supporting c++ excpetions not using directly the seh mechainsm in windows.
 
 Change _CxxThrowException and _CxxFrameHandler3 to MyCxxThrowException and MyCxxFrameHandler3.
 
