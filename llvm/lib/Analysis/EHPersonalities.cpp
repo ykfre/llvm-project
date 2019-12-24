@@ -35,7 +35,7 @@ EHPersonality llvm::classifyEHPersonality(const Value *Pers) {
     .Case("_except_handler3",          EHPersonality::MSVC_X86SEH)
     .Case("_except_handler4",          EHPersonality::MSVC_X86SEH)
     .Case("__C_specific_handler",      EHPersonality::MSVC_Win64SEH)
-    .Case("__CxxFrameHandler3",        EHPersonality::MSVC_CXX)
+    .Case("MyCxxFrameHandler3",        EHPersonality::MSVC_CXX)
     .Case("ProcessCLRException",       EHPersonality::CoreCLR)
     .Case("rust_eh_personality",       EHPersonality::Rust)
     .Case("__gxx_wasm_personality_v0", EHPersonality::Wasm_CXX)
@@ -52,7 +52,7 @@ StringRef llvm::getEHPersonalityName(EHPersonality Pers) {
   case EHPersonality::GNU_ObjC:      return "__objc_personality_v0";
   case EHPersonality::MSVC_X86SEH:   return "_except_handler3";
   case EHPersonality::MSVC_Win64SEH: return "__C_specific_handler";
-  case EHPersonality::MSVC_CXX:      return "__CxxFrameHandler3";
+  case EHPersonality::MSVC_CXX:      return "MyCxxFrameHandler3";
   case EHPersonality::CoreCLR:       return "ProcessCLRException";
   case EHPersonality::Rust:          return "rust_eh_personality";
   case EHPersonality::Wasm_CXX:      return "__gxx_wasm_personality_v0";

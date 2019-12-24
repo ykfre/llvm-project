@@ -734,7 +734,7 @@ public:
     llvm::FunctionType *FTy =
         llvm::FunctionType::get(CGM.VoidTy, Args, /*isVarArg=*/false);
     llvm::FunctionCallee Throw =
-        CGM.CreateRuntimeFunction(FTy, "_CxxThrowException");
+        CGM.CreateRuntimeFunction(FTy, "MyCxxThrowException");
     // _CxxThrowException is stdcall on 32-bit x86 platforms.
     if (CGM.getTarget().getTriple().getArch() == llvm::Triple::x86) {
       if (auto *Fn = dyn_cast<llvm::Function>(Throw.getCallee()))
