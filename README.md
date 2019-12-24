@@ -46,7 +46,7 @@ will raise an error in compilation time.
     }
 will raise an error in compilation time.
 
-4) make sure noexcept function can not call a function which may throw without the function to be placed under try catch
+4) make sure a noexcept function can not call a function which may throw without the function to be placed under an ellipsis try catch block
 ##### for example:
     void f()
     {
@@ -56,6 +56,31 @@ will raise an error in compilation time.
     void g() noexcpet()
     {
         f();
+    }
+    
+##### you need to replace it to:
+    void f()
+    {
+        throw 1;
+    }
+
+    void g() noexcpet()
+    {
+        try
+        {
+            f();
+        }
+        catch(const int& a)
+        {
+        //  logic
+        }
+        // For now you must use elipsis (even if you do nothing in this catch), and not catch it by int, although f only throws int
+        // To make sure the error cann't escape the current function, in the futre I may add an option to catch the exceptions by a 
+        // base class exception.
+        catch(...)
+        {
+            // empty on purpose.
+        }
     }
 will raise an error in compilation time.
 
