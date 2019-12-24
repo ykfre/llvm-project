@@ -6851,6 +6851,9 @@ def err_exceptions_disabled : Error<
   "cannot use '%0' with exceptions disabled">;
 def err_objc_exceptions_disabled : Error<
   "cannot use '%0' with Objective-C exceptions disabled">;
+
+def err_nested_exception_is_not_supported : Error<
+  "%0 nested exception in the same function is not supported">;
 def warn_throw_in_noexcept_func : Warning<
   "%0 has a non-throwing exception specification but can still throw">,
   InGroup<Exceptions>;
@@ -6862,6 +6865,10 @@ def err_seh_try_outside_functions : Error<
   "cannot use SEH '__try' in blocks, captured regions, or Obj-C method decls">;
 def err_mixing_cxx_try_seh_try : Error<
   "cannot use C++ 'try' in the same function as SEH '__try'">;
+def err_rethrow_is_not_supported : Error<
+  "empty throw is not supported">;
+  def err_catch_without_reffernce_is_not_supported : Error<
+  "catch without refference is not supported">;
 def err_seh_try_unsupported : Error<
   "SEH '__try' is not supported on this target">;
 def note_conflicting_try_here : Note<

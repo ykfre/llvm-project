@@ -45,9 +45,13 @@
 #include <algorithm>
 #include <deque>
 #include <iterator>
+#include "clang/ASTMatchers/ASTMatchers.h"
+#include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/AST/Expr.h"
 
 using namespace clang;
 
+using namespace clang::ast_matchers;
 //===----------------------------------------------------------------------===//
 // Unreachable code analysis.
 //===----------------------------------------------------------------------===//
@@ -250,6 +254,14 @@ static bool checkForRecursiveFunctionCall(const FunctionDecl *FD, CFG *cfg) {
   return foundRecursion;
 }
 
+
+static bool isNoexcept(const FunctionDecl* FD) {
+	const auto* FPT = FD->getType()->castAs<FunctionProtoType>();
+	if (FD->hasAttr<NoThrowAttr>() || FPT->isNothrow() || FD->isExternC())
+		return true;
+	return false;
+}
+
 static void checkRecursiveFunction(Sema &S, const FunctionDecl *FD,
                                    const Stmt *Body, AnalysisDeclContext &AC) {
   FD = FD->getCanonicalDecl();
@@ -272,6 +284,114 @@ static void checkRecursiveFunction(Sema &S, const FunctionDecl *FD,
     S.Diag(Body->getBeginLoc(), diag::warn_infinite_recursive_function);
 }
 
+class InnerThrowVisitor : public RecursiveASTVisitor<InnerThrowVisitor> {
+    using Base = RecursiveASTVisitor<InnerThrowVisitor>;
+
+public:
+    InnerThrowVisitor(Sema& sema) :S(sema) {};
+    bool TraverseStmt(Stmt* Node) {
+        if (!Node)
+            return Base::TraverseStmt(Node);
+
+        switch (Node->getStmtClass()) {
+        case Stmt::CXXTryStmtClass:
+        {
+            if (InnerThrow)
+            {
+                S.Diag(Node->getBeginLoc(), diag::err_nested_exception_is_not_supported);
+            }
+            InnerThrow = true;
+            Base::TraverseStmt(Node);
+			InnerThrow = false;
+			break;
+        }
+        default:
+			Base::TraverseStmt(Node);
+            break;
+        }
+        return true;
+    }
+private:
+	bool InnerThrow = false;
+    Sema& S;
+};
+
+class NotCatchedCallVisitor : public RecursiveASTVisitor<NotCatchedCallVisitor> {
+	using Base = RecursiveASTVisitor<NotCatchedCallVisitor>;
+
+public:
+	NotCatchedCallVisitor(Sema& sema, const FunctionDecl* fd) :S(sema), FD(fd) {};
+	bool TraverseStmt(Stmt* Node) {
+		if (!Node)
+			return Base::TraverseStmt(Node);
+
+		switch (Node->getStmtClass()) {
+		case Stmt::CXXTryStmtClass:
+		{
+			inThrow= true;
+			Base::TraverseStmt(Node);
+			inThrow = false;
+			break;
+		}
+		case Stmt::CXXCatchStmtClass:
+		{
+            auto cxxCatchStmt = dyn_cast<CXXCatchStmt>(Node);
+			QualType Caught = cxxCatchStmt->getCaughtType();
+			if (Caught.isNull())
+            {
+                notHandledCallLocation.reset();
+            }
+			Base::TraverseStmt(Node);
+			break;
+		}
+        case Stmt::CXXMemberCallExprClass:
+		case Stmt::CallExprClass:
+		case Stmt::CXXOperatorCallExprClass:
+        {
+            auto callExpr = dyn_cast<CallExpr>(Node);
+            if(callExpr->getDirectCallee())
+            {
+                if(!isNoexcept(dyn_cast<FunctionDecl>(callExpr->getCalleeDecl())))
+                {
+                    if(!inThrow)
+                    {
+                        S.Diag(callExpr->getBeginLoc(), diag::warn_throw_in_noexcept_func) << FD;
+                    }
+					notHandledCallLocation.emplace(callExpr->getBeginLoc());
+                }
+            }
+			Base::TraverseStmt(Node);
+			break;
+		}
+		case Stmt::CXXConstructExprClass:
+        {
+			auto callExpr = dyn_cast<CXXConstructExpr>(Node);
+				if (!isNoexcept(dyn_cast<FunctionDecl>(callExpr->getConstructor())))
+				{
+					if (!inThrow)
+					{
+						S.Diag(callExpr->getBeginLoc(), diag::warn_throw_in_noexcept_func) << FD;
+					}
+                    else
+                    {
+						notHandledCallLocation.emplace(callExpr->getBeginLoc());
+                    }
+				}
+			Base::TraverseStmt(Node);
+			break;
+        }
+		default:
+			Base::TraverseStmt(Node);
+			break;
+		}
+		return true;
+	}
+	Optional<SourceLocation> notHandledCallLocation;
+private:
+    bool inThrow = false;
+    const FunctionDecl* FD;
+	Sema& S;
+};
 //===----------------------------------------------------------------------===//
 // Check for throw in a non-throwing function.
 //===----------------------------------------------------------------------===//
@@ -315,6 +435,7 @@ static bool throwEscapes(Sema &S, const CXXThrowExpr *E, CFGBlock &ThrowBlock,
   return false;
 }
 
+
 static void visitReachableThrows(
     CFG *BodyCFG,
     llvm::function_ref<void(const CXXThrowExpr *, CFGBlock &)> Visit) {
@@ -331,6 +452,24 @@ static void visitReachableThrows(
         Visit(Throw, *B);
     }
   }
+}
+
+static void visitReachableCatches(
+	CFG *BodyCFG,
+	llvm::function_ref<void(const CXXCatchStmt *, CFGBlock &)> Visit) {
+	llvm::BitVector Reachable(BodyCFG->getNumBlockIDs());
+	clang::reachable_code::ScanReachableFromBlock(&BodyCFG->getEntry(), Reachable);
+	for (CFGBlock *B : *BodyCFG) {
+		if (!Reachable[B->getBlockID()])
+			continue;
+		for (CFGElement &E : *B) {
+			Optional<CFGStmt> S = E.getAs<CFGStmt>();
+			if (!S)
+				continue;
+			if (auto *Catch = dyn_cast<CXXCatchStmt>(S->getStmt()))
+				Visit(Catch, *B);
+		}
+	}
 }
 
 static void EmitDiagForCXXThrowInNonThrowingFunc(Sema &S, SourceLocation OpLoc,
@@ -353,24 +492,75 @@ static void EmitDiagForCXXThrowInNonThrowingFunc(Sema &S, SourceLocation OpLoc,
   }
 }
 
-static void checkThrowInNonThrowingFunc(Sema &S, const FunctionDecl *FD,
-                                        AnalysisDeclContext &AC) {
-  CFG *BodyCFG = AC.getCFG();
-  if (!BodyCFG)
-    return;
-  if (BodyCFG->getExit().pred_empty())
-    return;
-  visitReachableThrows(BodyCFG, [&](const CXXThrowExpr *Throw, CFGBlock &Block) {
-    if (throwEscapes(S, Throw, Block, BodyCFG))
-      EmitDiagForCXXThrowInNonThrowingFunc(S, Throw->getThrowLoc(), FD);
-  });
+static void checkForInnerThrows(Sema& S, const FunctionDecl* FD,
+
+    AnalysisDeclContext& AC) {
+    CFG* BodyCFG = AC.getCFG();
+    if (!BodyCFG)
+        return;
+    InnerThrowVisitor innerThrowVisitor(S);
+    innerThrowVisitor.TraverseStmt(FD->getBody());
 }
 
-static bool isNoexcept(const FunctionDecl *FD) {
-  const auto *FPT = FD->getType()->castAs<FunctionProtoType>();
-  if (FPT->isNothrow() || FD->hasAttr<NoThrowAttr>())
-    return true;
-  return false;
+static void checkForRethrowException(Sema &S, const FunctionDecl *FD,
+
+    AnalysisDeclContext &AC) {
+	CFG* BodyCFG = AC.getCFG();
+	if (!BodyCFG)
+		return;
+	if (BodyCFG->getExit().pred_empty())
+		return;
+	visitReachableThrows(BodyCFG, [&](const CXXThrowExpr *Throw, CFGBlock &Block) {
+		if(Throw->getSubExpr() == nullptr)
+		{
+			S.Diag(Throw->getBeginLoc(), diag::err_rethrow_is_not_supported);
+		}
+	});
+}
+
+static void checkForNotCatchingByReffernece(Sema &S, const FunctionDecl *FD,
+	AnalysisDeclContext &AC) {
+	CFG *BodyCFG = AC.getCFG();
+	if (!BodyCFG)
+		return;
+	if (BodyCFG->getExit().pred_empty())
+		return;
+	visitReachableCatches(BodyCFG, [&](const CXXCatchStmt *Catch, CFGBlock &Block) {
+		auto caughtType = Catch->getCaughtType();
+		if (caughtType.isNull())
+			return;
+		if (!caughtType->isReferenceType()) {
+			S.Diag(Catch->getBeginLoc(), diag::err_catch_without_reffernce_is_not_supported);
+		}
+		
+	});
+}
+
+static void checkThrowInNonThrowingFunc(Sema &S, const FunctionDecl *FD,
+                                        AnalysisDeclContext &AC) {
+	CFG* BodyCFG = AC.getCFG();
+	if (!BodyCFG)
+		return;
+	if (BodyCFG->getExit().pred_empty())
+		return;
+	visitReachableThrows(BodyCFG, [&](const CXXThrowExpr* Throw, CFGBlock& Block) {
+		if (throwEscapes(S, Throw, Block, BodyCFG))
+			EmitDiagForCXXThrowInNonThrowingFunc(S, Throw->getThrowLoc(), FD);
+	});
+}
+
+static void checkThrowFuncionInNonThrowingFunc(Sema& S, const FunctionDecl* FD,
+	AnalysisDeclContext& AC) {
+	if (!FD->getBody())
+	{
+		return;
+	}
+	NotCatchedCallVisitor visitor(S, FD);
+	visitor.TraverseStmt(FD->getBody());
+	if (visitor.notHandledCallLocation.hasValue())
+	{
+		S.Diag(*visitor.notHandledCallLocation, diag::warn_throw_in_noexcept_func) << FD;
+	}
 }
 
 //===----------------------------------------------------------------------===//
@@ -2226,6 +2416,18 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
     if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
       checkRecursiveFunction(S, FD, Body, AC);
     }
+  }
+
+  if (S.getLangOpts().CPlusPlus)
+  {
+	  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D))
+	  {
+          checkThrowFuncionInNonThrowingFunc(S, FD, AC);
+		  checkForNotCatchingByReffernece(S, FD, AC);
+		  checkForRethrowException(S, FD, AC);
+          checkForInnerThrows(S, FD,AC);
+
+	  }
   }
 
   // Check for throw out of non-throwing function.

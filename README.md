@@ -1,3 +1,90 @@
+# Changes for supporting c++ excpetions not using directly the seh mechainsm in windows.
+
+Change _CxxThrowException and _CxxFrameHandler3 to MyCxxThrowException and MyCxxFrameHandler3.
+
+#### Add a refactoring tool helper - for making it simpler to move from c/ c++ which not throws exceptions to throw c++ exception by adding a noexcept keyword to every function declaration (except extern "C" functions)
+
+Add the following warnings:
+1) no empty throw - meaning rethrow exception.
+##### for example:
+    try
+    {
+        throw 1;
+    }
+    catch(...)
+    {
+        throw;
+    }
+will raise an error in compilation time.
+
+2) no catching exception not by refernce, including but not limitied to pointer passing.
+##### for example:
+    try
+    {
+        throw 1;
+    }
+    catch(int a)
+    {
+    }
+will raise an error in compilation time.
+
+3) no nested try catch in the same function, and disabling inlining by force.
+##### for example:
+    class m{};
+    try
+    {
+        try
+        {
+            throw m;
+        }
+        catch(int a)
+        {
+        }
+     }
+    catch(...)
+    {
+    }
+will raise an error in compilation time.
+
+4) make sure a noexcept function can not call a function which may throw without the function to be placed under an ellipsis try catch block
+##### for example:
+    void f()
+    {
+        throw 1;
+    }
+
+    void g() noexcpet()
+    {
+        f();
+    }
+    
+##### you need to replace it to:
+    void f()
+    {
+        throw 1;
+    }
+
+    void g() noexcpet()
+    {
+        try
+        {
+            f();
+        }
+        catch(const int& a)
+        {
+        //  logic
+        }
+        // For now you must use elipsis (even if you do nothing in this catch), and not catch it by int, although f only throws int
+        // To make sure the error cann't escape the current function, in the futre I may add an option to catch the exceptions by a 
+        // base class exception.
+        catch(...)
+        {
+            // empty on purpose.
+        }
+    }
+will raise an error in compilation time.
+
+
 # The LLVM Compiler Infrastructure
 
 This directory and its subdirectories contain source code for LLVM,
