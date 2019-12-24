@@ -1,3 +1,65 @@
+# Changes for supporting c++ excpetions not based on the seh mechainsm in windows.
+
+Change _CxxThrowException and _CxxFrameHandler3 to MyCxxThrowException and MyCxxFrameHandler3.
+
+#### Add a refactoring tool helper - for making it simpler to move from c/ c++ which not throws exceptions to throw c++ exception by adding a noexcept keyword to every function declaration (except extern "C" functions)
+
+Add the following warnings:
+1) no empty throw - meaning rethrow exception.
+##### for example:
+    try
+    {
+        throw 1;
+    }
+    catch(...)
+    {
+        throw;
+    }
+will raise an error in compilation time.
+
+2) no catching exception not by refernce, including but not limitied to pointer passing.
+##### for example:
+    try
+    {
+        throw 1;
+    }
+    catch(int a)
+    {
+    }
+will raise an error in compilation time.
+
+3) no nested try catch in the same function, and disabling inlining by force.
+##### for example:
+    class m{};
+    try
+    {
+        try
+        {
+            throw m;
+        }
+        catch(int a)
+        {
+        }
+     }
+    catch(...)
+    {
+    }
+will raise an error in compilation time.
+
+4) make sure noexcept function can not call a function which may throw without the function to be placed under try catch
+##### for example:
+    void f()
+    {
+        throw 1;
+    }
+
+    void g() noexcpet()
+    {
+        f();
+    }
+will raise an error in compilation time.
+
+
 # The LLVM Compiler Infrastructure
 
 This directory and its subdirectories contain source code for LLVM,
