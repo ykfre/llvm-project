@@ -288,7 +288,7 @@ class InnerThrowVisitor : public RecursiveASTVisitor<InnerThrowVisitor> {
     using Base = RecursiveASTVisitor<InnerThrowVisitor>;
 
 public:
-    InnerThrowVisitor(Sema& sema) :S(sema) {};
+    InnerThrowVisitor(Sema& sema, const FunctionDecl* fd) :S(sema), FD(fd) {};
     bool TraverseStmt(Stmt* Node) {
         if (!Node)
             return Base::TraverseStmt(Node);
@@ -298,7 +298,7 @@ public:
         {
             if (InnerThrow)
             {
-                S.Diag(Node->getBeginLoc(), diag::err_nested_exception_is_not_supported);
+                S.Diag(Node->getBeginLoc(), diag::err_nested_exception_is_not_supported) << FD;
             }
             InnerThrow = true;
             Base::TraverseStmt(Node);
@@ -313,6 +313,7 @@ public:
     }
 private:
 	bool InnerThrow = false;
+    const FunctionDecl* FD;
     Sema& S;
 };
 
@@ -355,7 +356,7 @@ public:
                 {
                     if(!inThrow)
                     {
-                        S.Diag(callExpr->getBeginLoc(), diag::warn_throw_in_noexcept_func) << FD;
+                        S.Diag(callExpr->getBeginLoc(), diag::warn_call_function_which_may_throw_in_noexcept_func) << FD;
                     }
 					notHandledCallLocation.emplace(callExpr->getBeginLoc());
                 }
@@ -498,7 +499,7 @@ static void checkForInnerThrows(Sema& S, const FunctionDecl* FD,
     CFG* BodyCFG = AC.getCFG();
     if (!BodyCFG)
         return;
-    InnerThrowVisitor innerThrowVisitor(S);
+    InnerThrowVisitor innerThrowVisitor(S, FD);
     innerThrowVisitor.TraverseStmt(FD->getBody());
 }
 
@@ -555,6 +556,10 @@ static void checkThrowFuncionInNonThrowingFunc(Sema& S, const FunctionDecl* FD,
 	{
 		return;
 	}
+    if(!isNoexcept(FD))
+    {
+        return;
+    }
 	NotCatchedCallVisitor visitor(S, FD);
 	visitor.TraverseStmt(FD->getBody());
 	if (visitor.notHandledCallLocation.hasValue())

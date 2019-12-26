@@ -31,6 +31,13 @@ using namespace clang::driver;
 using namespace clang::tooling;
 using namespace llvm;
 
+static cl::OptionCategory MyToolCategory("My tool options");
+
+static cl::opt<std::string>
+    OutFilePath("out",
+                   cl::desc("The yaml output file path."),cl::cat(MyToolCategory)
+                   );
+
 std::vector<AtomicChange> Changes;
 
 static bool isNoexcept(const FunctionDecl* FD) {
@@ -126,10 +133,16 @@ public:
 		{
 			shouldAddToOffset -= 1;
 		}
-		AtomicChange Change(astContext->getSourceManager(), func->getEndLoc().getLocWithOffset(shouldAddToOffset));
+		
+		auto location = func->getEndLoc().getLocWithOffset(shouldAddToOffset);
+		if(func->isThisDeclarationADefinition() && func->getBody())
+		{
+			location = func->getBody()->getBeginLoc().getLocWithOffset(-1);
+		}
+		AtomicChange Change(astContext->getSourceManager(), location);
 		
 			
-		Change.insert(astContext->getSourceManager(), func->getEndLoc().getLocWithOffset(shouldAddToOffset),
+		Change.insert(astContext->getSourceManager(), location,
 			" noexcept ");
 		Changes.push_back(Change);
 		
@@ -179,7 +192,6 @@ public:
     }
 };
 
-static cl::OptionCategory MyToolCategory("My tool options");
 
 int main(int argc, const char **argv) {
     // parse the command-line args passed to your code
@@ -189,7 +201,12 @@ int main(int argc, const char **argv) {
 
     // run the Clang Tool, creating a new FrontendAction (explained below)
     int result = Tool.run(newFrontendActionFactory<ExampleFrontendAction>().get());
-	std::string ExportFixes = "c:\\temp\\b\\a.yaml";
+	if (OutFilePath.size() == 0) {
+		llvm::errs() << "Need yaml output file path " << '\n';
+		cl::PrintHelpMessage();
+		return -1;
+	}
+	std::string ExportFixes = OutFilePath;
 	if (!ExportFixes.empty()) {
 		std::error_code EC;
 		llvm::raw_fd_ostream OS(ExportFixes, EC, llvm::sys::fs::OF_None);

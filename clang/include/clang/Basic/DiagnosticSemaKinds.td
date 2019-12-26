@@ -6756,6 +6756,9 @@ def err_objc_exceptions_disabled : Error<
 
 def err_nested_exception_is_not_supported : Error<
   "%0 nested exception in the same function is not supported">;
+def warn_call_function_which_may_throw_in_noexcept_func : Warning<
+  "%0 has a non-throwing exception specification but call a function which may throw">,
+  InGroup<Exceptions>;
 def warn_throw_in_noexcept_func : Warning<
   "%0 has a non-throwing exception specification but can still throw">,
   InGroup<Exceptions>;
