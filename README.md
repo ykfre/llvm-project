@@ -2,7 +2,7 @@
 
 Change _CxxThrowException and _CxxFrameHandler3 to MyCxxThrowException and MyCxxFrameHandler3.
 
-#### Add a refactoring tool helper - for making it simpler to move from c/ c++ which not throws exceptions to throw c++ exception by adding a noexcept keyword to every function declaration (except extern "C" functions)
+#### Add a refactoring tool helper - for making it simpler to move from c/ c++ which not throws exceptions to throw c++ exception by adding a noexcept keyword to every function declaration (except extern "C" functions), and then we will get a warning if this function tries to call a function which may raise an exception, so it will be safe always to change a function from state of not throwing, to a state of throwing.
 
 Add the following warnings:
 1) no empty throw - meaning rethrow exception.
