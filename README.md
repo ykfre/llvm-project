@@ -1,8 +1,8 @@
 # Changes for supporting c++ excpetions not using directly the seh mechainsm in windows.
-Disabling inlining by force
-Change _CxxThrowException and _CxxFrameHandler3 to MyCxxThrowException and MyCxxFrameHandler3.
+* Disabling inlining by force.
+* Change _CxxThrowException and _CxxFrameHandler3 to MyCxxThrowException and MyCxxFrameHandler3 (usefull for making it possilbe to use another Crts) .
 
-#### Add a refactoring tool helper - for making it simpler to move from c/ c++ which not throws exceptions to throw c++ exception by adding a noexcept keyword to every function declaration (except extern "C" functions), and then we will get a warning if this function tries to call a function which may raise an exception, so it will be safe always to change a function from state of not throwing, to a state of throwing.
+* #### Add a refactoring tool helper - for making it simpler to move from c/ c++ which not throws exceptions to throw c++ exception by adding a noexcept keyword to every function declaration (except extern "C" functions), and then we will get a warning if this function tries to call a function which may raise an exception, so it will be safe always to change a function from state of not throwing, to a state of throwing.
 
 Add the following warnings:
 1) No empty throw - meaning rethrow exception.
