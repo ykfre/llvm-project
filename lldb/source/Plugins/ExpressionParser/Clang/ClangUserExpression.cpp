@@ -450,16 +450,10 @@ CppModuleConfiguration GetModuleConfig(lldb::LanguageType language,
                                        ExecutionContext &exe_ctx) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
 
-  // Don't do anything if this is not a C++ module configuration.
-  if (!SupportsCxxModuleImport(language))
-    return LogConfigError("Language doesn't support C++ modules");
 
   Target *target = exe_ctx.GetTargetPtr();
   if (!target)
     return LogConfigError("No target");
-
-  if (!target->GetEnableImportStdModule())
-    return LogConfigError("Importing std module not enabled in settings");
 
   StackFrame *frame = exe_ctx.GetFramePtr();
   if (!frame)

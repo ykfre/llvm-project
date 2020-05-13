@@ -384,10 +384,7 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
   options.SetTryAllThreads(m_command_options.try_all_threads);
   options.SetDebug(m_command_options.debug);
   options.SetLanguage(m_command_options.language);
-  options.SetExecutionPolicy(
-      m_command_options.allow_jit
-          ? EvaluateExpressionOptions::default_execution_policy
-          : lldb_private::eExecutionPolicyNever);
+  options.SetExecutionPolicy(eExecutionPolicyAlways);
 
   bool auto_apply_fixits;
   if (m_command_options.auto_apply_fixits == eLazyBoolCalculate)

@@ -14,6 +14,7 @@
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/TargetInfo.h"
+
 #include "clang/Basic/Version.h"
 #include "clang/CodeGen/CodeGenAction.h"
 #include "clang/CodeGen/ModuleBuilder.h"
@@ -21,6 +22,11 @@
 #include "clang/Edit/EditedSource.h"
 #include "clang/Edit/EditsReceiver.h"
 #include "clang/Frontend/CompilerInstance.h"
+
+#include <iostream>
+#include <sstream>
+#include <fstream>
+
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
@@ -28,6 +34,7 @@
 #include "clang/Frontend/TextDiagnosticBuffer.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Parse/ParseAST.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Rewrite/Frontend/FrontendActions.h"
@@ -36,6 +43,7 @@
 #include "clang/Sema/SemaConsumer.h"
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Object/Coff.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/Debug.h"
@@ -241,26 +249,364 @@ private:
 };
 
 static void SetupModuleHeaderPaths(CompilerInstance *compiler,
-                                   std::vector<std::string> include_directories,
-                                   lldb::TargetSP target_sp) {
+                                   std::vector<std::string> include_directories) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
 
   HeaderSearchOptions &search_opts = compiler->getHeaderSearchOpts();
-
   for (const std::string &dir : include_directories) {
     search_opts.AddPath(dir, frontend::System, false, true);
     LLDB_LOG(log, "Added user include dir: {0}", dir);
   }
+}
 
-  llvm::SmallString<128> module_cache;
-  auto props = ModuleList::GetGlobalModuleListProperties();
-  props.GetClangModulesCachePath().GetPath(module_cache);
-  search_opts.ModuleCachePath = module_cache.str();
-  LLDB_LOG(log, "Using module cache path: {0}", module_cache.c_str());
+std::vector<char> g_deserailizeCompilerInvocation;
+int g_index = 0;
 
-  search_opts.ResourceDir = GetClangResourceDir().GetPath();
+void deserialize(void *obj, size_t sizeofObj) {
+  memcpy(&obj, g_deserailizeCompilerInvocation.data() + g_index, sizeofObj);
 
-  search_opts.ImplicitModuleMaps = true;
+  g_index += sizeofObj;
+}
+
+template<class T>
+void deserialize(T obj) { deserialize((void *)&obj, sizeof(obj)); }
+
+
+void deserialize(std::string &obj) {
+  memcpy((char *)obj.c_str(), g_deserailizeCompilerInvocation.data() + g_index,
+         strlen(g_deserailizeCompilerInvocation.data() + g_index) + 1);
+  g_index += strlen(g_deserailizeCompilerInvocation.data() + g_index) + 1;
+}
+
+void deserialize(HeaderSearchOptions::Entry &obj) {
+  deserialize(obj.Path);
+  deserialize(obj.IgnoreSysRoot);
+  deserialize(obj.IsFramework);
+  deserialize(obj.Group);
+}
+
+template <typename T> void deserialize(std::vector<T> &obj) {
+  size_t objectsNum = 0;
+  deserialize(objectsNum);
+  for (int i = 0; i < objectsNum;i++) {
+    T item;
+    deserialize(item);
+    obj.push_back(item);
+  }
+}
+
+void deserialize(std::vector<HeaderSearchOptions::SystemHeaderPrefix> &obj) {
+  size_t objectsNum = 0;
+  deserialize(objectsNum);
+  for (int i = 0; i < objectsNum; i++) {
+    HeaderSearchOptions::SystemHeaderPrefix systemPrefix("",false);
+    deserialize(systemPrefix);
+    obj.push_back(systemPrefix);
+  }
+}
+
+void deserialize(std::vector<HeaderSearchOptions::Entry> &obj) {
+  size_t objectsNum = 0;
+  deserialize(objectsNum);
+  for (int i = 0; i < objectsNum; i++) {
+    HeaderSearchOptions::Entry entry("", frontend::IncludeDirGroup::Quoted, true,
+                               true);
+    deserialize(entry);
+    obj.push_back(entry);
+  }
+}
+
+template <typename T, typename Y> void deserialize(std::map<T, Y> &obj) {
+  size_t objectsNum = 0;
+  deserialize(objectsNum);
+  for (int i = 0; i < objectsNum; i++) {
+    T key;
+    deserialize(key);
+    Y value;
+    deserialize(value);
+    obj[key] = value;
+  }
+}
+
+void deserialize(std::vector<std::pair<std::string, bool>> &obj) {
+  size_t objectsNum = 0;
+  deserialize(objectsNum);
+  for (int i = 0; i < objectsNum; i++) {
+    std::string first;
+    bool second = false;
+    deserialize(first);
+    deserialize(second);
+
+    obj.push_back(std::make_pair(first, second));
+  }
+}
+
+void deserialize(HeaderSearchOptions::SystemHeaderPrefix &obj) {
+  deserialize(obj.Prefix);
+  deserialize(obj.IsSystemHeader);
+}
+
+void deserialize(LangOptions &langOptions) {
+  deserialize(langOptions.C99);
+  deserialize(langOptions.C11);
+  deserialize(langOptions.C17);
+  deserialize(langOptions.C2x);
+  deserialize(langOptions.MSVCCompat);
+  deserialize(langOptions.MicrosoftExt);
+  deserialize(langOptions.AsmBlocks);
+  deserialize(langOptions.Borland);
+  deserialize(langOptions.CPlusPlus);
+  deserialize(langOptions.CPlusPlus11);
+  deserialize(langOptions.CPlusPlus14);
+  deserialize(langOptions.CPlusPlus17);
+  deserialize(langOptions.CPlusPlus2a);
+  deserialize(langOptions.ObjC);
+  deserialize(langOptions.ObjCDefaultSynthProperties);
+  deserialize(langOptions.EncodeExtendedBlockSig);
+  deserialize(langOptions.ObjCInferRelatedResultType);
+  deserialize(langOptions.AppExt);
+  deserialize(langOptions.Trigraphs);
+  deserialize(langOptions.LineComment);
+  deserialize(langOptions.Bool);
+  deserialize(langOptions.Half);
+  deserialize(langOptions.WChar);
+  deserialize(langOptions.Char8);
+  deserialize(langOptions.DeclSpecKeyword);
+  deserialize(langOptions.DollarIdents);
+  deserialize(langOptions.AsmPreprocessor);
+  deserialize(langOptions.GNUMode);
+  deserialize(langOptions.GNUKeywords);
+  deserialize(langOptions.GNUCVersion);
+  deserialize(langOptions.ImplicitInt);
+  deserialize(langOptions.Digraphs);
+  deserialize(langOptions.HexFloats);
+  deserialize(langOptions.CXXOperatorNames);
+  deserialize(langOptions.AppleKext);
+  deserialize(langOptions.PascalStrings);
+  deserialize(langOptions.WritableStrings);
+  deserialize(langOptions.ConstStrings);
+  deserialize(langOptions.ConvergentFunctions);
+  deserialize(langOptions.AltiVec);
+  deserialize(langOptions.ZVector);
+  deserialize(langOptions.Exceptions);
+  deserialize(langOptions.ObjCExceptions);
+  deserialize(langOptions.CXXExceptions);
+  deserialize(langOptions.DWARFExceptions);
+  deserialize(langOptions.SjLjExceptions);
+  deserialize(langOptions.SEHExceptions);
+  deserialize(langOptions.WasmExceptions);
+  deserialize(langOptions.ExternCNoUnwind);
+  deserialize(langOptions.TraditionalCPP);
+  deserialize(langOptions.RTTI);
+  deserialize(langOptions.RTTIData);
+  deserialize(langOptions.MSBitfields);
+  deserialize(langOptions.Freestanding);
+  deserialize(langOptions.NoBuiltin);
+  deserialize(langOptions.NoMathBuiltin);
+  deserialize(langOptions.GNUAsm);
+  deserialize(langOptions.Coroutines);
+  deserialize(langOptions.DllExportInlines);
+  deserialize(langOptions.RelaxedTemplateTemplateArgs);
+  deserialize(langOptions.DoubleSquareBracketAttributes);
+  deserialize(langOptions.ThreadsafeStatics);
+  deserialize(langOptions.POSIXThreads);
+  deserialize(langOptions.Blocks);
+  deserialize(langOptions.EmitAllDecls);
+  deserialize(langOptions.MathErrno);
+  deserialize(langOptions.HeinousExtensions);
+  deserialize(langOptions.Modules);
+  deserialize(langOptions.ModulesTS);
+  deserialize(langOptions.CPlusPlusModules);
+  deserialize(langOptions.CompilingPCH);
+  deserialize(langOptions.BuildingPCHWithObjectFile);
+  deserialize(langOptions.CacheGeneratedPCH);
+  deserialize(langOptions.ModulesDeclUse);
+  deserialize(langOptions.ModulesSearchAll);
+  deserialize(langOptions.ModulesStrictDeclUse);
+  deserialize(langOptions.ModulesErrorRecovery);
+  deserialize(langOptions.ImplicitModules);
+  deserialize(langOptions.ModulesLocalVisibility);
+  deserialize(langOptions.Optimize);
+  deserialize(langOptions.OptimizeSize);
+  deserialize(langOptions.Static);
+  deserialize(langOptions.PackStruct);
+  deserialize(langOptions.MaxTypeAlign);
+  deserialize(langOptions.AlignDouble);
+  deserialize(langOptions.LongDoubleSize);
+  deserialize(langOptions.PPCIEEELongDouble);
+  deserialize(langOptions.PICLevel);
+  deserialize(langOptions.PIE);
+  deserialize(langOptions.ROPI);
+  deserialize(langOptions.RWPI);
+  deserialize(langOptions.GNUInline);
+  deserialize(langOptions.NoInlineDefine);
+  deserialize(langOptions.Deprecated);
+  deserialize(langOptions.FastMath);
+  deserialize(langOptions.FiniteMathOnly);
+  deserialize(langOptions.UnsafeFPMath);
+  deserialize(langOptions.ObjCGCBitmapPrint);
+  deserialize(langOptions.AccessControl);
+  deserialize(langOptions.CharIsSigned);
+  deserialize(langOptions.WCharSize);
+  deserialize(langOptions.WCharIsSigned);
+  deserialize(langOptions.ShortEnums);
+  deserialize(langOptions.OpenCL);
+  deserialize(langOptions.OpenCLVersion);
+  deserialize(langOptions.OpenCLCPlusPlus);
+  deserialize(langOptions.OpenCLCPlusPlusVersion);
+  deserialize(langOptions.NativeHalfType);
+  deserialize(langOptions.NativeHalfArgsAndReturns);
+  deserialize(langOptions.HalfArgsAndReturns);
+  deserialize(langOptions.CUDA);
+  deserialize(langOptions.HIP);
+  deserialize(langOptions.OpenMP);
+  deserialize(langOptions.OpenMPSimd);
+  deserialize(langOptions.OpenMPUseTLS);
+  deserialize(langOptions.OpenMPIsDevice);
+  deserialize(langOptions.OpenMPCUDAMode);
+  deserialize(langOptions.OpenMPIRBuilder);
+  deserialize(langOptions.OpenMPCUDAForceFullRuntime);
+  deserialize(langOptions.OpenMPCUDANumSMs);
+  deserialize(langOptions.OpenMPCUDABlocksPerSM);
+  deserialize(langOptions.OpenMPCUDAReductionBufNum);
+  deserialize(langOptions.OpenMPOptimisticCollapse);
+  deserialize(langOptions.RenderScript);
+  deserialize(langOptions.CUDAIsDevice);
+  deserialize(langOptions.CUDAAllowVariadicFunctions);
+  deserialize(langOptions.CUDAHostDeviceConstexpr);
+  deserialize(langOptions.CUDADeviceApproxTranscendentals);
+  deserialize(langOptions.GPURelocatableDeviceCode);
+  deserialize(langOptions.GPUAllowDeviceInit);
+  deserialize(langOptions.GPUMaxThreadsPerBlock);
+  deserialize(langOptions.SYCLIsDevice);
+  deserialize(langOptions.HIPUseNewLaunchAPI);
+  deserialize(langOptions.SizedDeallocation);
+  deserialize(langOptions.AlignedAllocation);
+  deserialize(langOptions.AlignedAllocationUnavailable);
+  deserialize(langOptions.NewAlignOverride);
+  deserialize(langOptions.ConceptSatisfactionCaching);
+  deserialize(langOptions.ModulesCodegen);
+  deserialize(langOptions.ModulesDebugInfo);
+  deserialize(langOptions.ElideConstructors);
+  deserialize(langOptions.DumpRecordLayouts);
+  deserialize(langOptions.DumpRecordLayoutsSimple);
+  deserialize(langOptions.DumpVTableLayouts);
+  deserialize(langOptions.NoConstantCFStrings);
+  deserialize(langOptions.InlineVisibilityHidden);
+  deserialize(langOptions.GlobalAllocationFunctionVisibilityHidden);
+  deserialize(langOptions.ParseUnknownAnytype);
+  deserialize(langOptions.DebuggerSupport);
+  deserialize(langOptions.DebuggerCastResultToId);
+  deserialize(langOptions.DebuggerObjCLiteral);
+  deserialize(langOptions.SpellChecking);
+  deserialize(langOptions.SinglePrecisionConstants);
+  deserialize(langOptions.FastRelaxedMath);
+  deserialize(langOptions.NoBitFieldTypeAlign);
+  deserialize(langOptions.HexagonQdsp6Compat);
+  deserialize(langOptions.ObjCAutoRefCount);
+  deserialize(langOptions.ObjCWeakRuntime);
+  deserialize(langOptions.ObjCWeak);
+  deserialize(langOptions.ObjCSubscriptingLegacyRuntime);
+  deserialize(langOptions.CFProtectionBranch);
+  deserialize(langOptions.FakeAddressSpaceMap);
+  deserialize(langOptions.IncludeDefaultHeader);
+  deserialize(langOptions.DeclareOpenCLBuiltins);
+  deserialize(langOptions.DelayedTemplateParsing);
+  deserialize(langOptions.BlocksRuntimeOptional);
+  deserialize(langOptions.CompleteMemberPointers);
+  deserialize(langOptions.SetVisibilityForExternDecls);
+  deserialize(langOptions.ArrowDepth);
+  deserialize(langOptions.InstantiationDepth);
+  deserialize(langOptions.ConstexprCallDepth);
+  deserialize(langOptions.ConstexprStepLimit);
+  deserialize(langOptions.EnableNewConstInterp);
+  deserialize(langOptions.BracketDepth);
+  deserialize(langOptions.NumLargeByValueCopy);
+  deserialize(langOptions.MSCompatibilityVersion);
+  deserialize(langOptions.ApplePragmaPack);
+  deserialize(langOptions.RetainCommentsFromSystemHeaders);
+  deserialize(langOptions.SanitizeAddressFieldPadding);
+  deserialize(langOptions.Cmse);
+  deserialize(langOptions.XRayInstrument);
+  deserialize(langOptions.XRayAlwaysEmitCustomEvents);
+  deserialize(langOptions.XRayAlwaysEmitTypedEvents);
+  deserialize(langOptions.ForceEmitVTables);
+  deserialize(langOptions.AllowEditorPlaceholders);
+  deserialize(langOptions.FunctionAlignment);
+  deserialize(langOptions.FixedPoint);
+  deserialize(langOptions.PaddingOnUnsignedFixedPoint);
+  deserialize(langOptions.RegisterStaticDestructors);
+  deserialize((size_t)langOptions.CFRuntime);
+  deserialize(langOptions.OverflowHandler);
+  deserialize(langOptions.ModuleName);
+  deserialize(langOptions.CurrentModule);
+  deserialize(langOptions.ModuleFeatures);
+  deserialize(langOptions.NoBuiltinFuncs);
+  deserialize(langOptions.OMPHostIRFile);
+  deserialize(langOptions.IsHeaderFile);
+}
+
+void deserialize(PreprocessorOptions &options) {
+  deserialize(options.Macros);
+  deserialize(options.Includes);
+  deserialize(options.MacroIncludes);
+  deserialize(options.UsePredefines);
+  deserialize(options.DetailedRecord);
+  deserialize(options.PCHWithHdrStop);
+  deserialize(options.PCHWithHdrStopCreate);
+  deserialize(options.PCHThroughHeader);
+  deserialize(options.ImplicitPCHInclude);
+  deserialize(options.ChainedIncludes);
+  deserialize(options.DisablePCHValidation);
+  deserialize(options.AllowPCHWithCompilerErrors);
+  deserialize(options.DumpDeserializedPCHDecls);
+  deserialize(options.GeneratePreamble);
+  deserialize(options.WriteCommentListToPCH);
+  deserialize(options.SingleFileParseMode);
+  deserialize(options.LexEditorPlaceholders);
+  deserialize(options.RemappedFilesKeepOriginalName);
+  deserialize(options.RetainRemappedFileBuffers);
+  deserialize(options.RetainExcludedConditionalBlocks);
+  deserialize(options.ObjCXXARCStandardLibrary);
+  deserialize(options.SetUpStaticAnalyzer);
+  deserialize(options.DisablePragmaDebugCrash);
+}
+
+void deserialize(HeaderSearchOptions &options) {
+  deserialize(options.Sysroot);
+  deserialize(options.UserEntries);
+  deserialize(options.SystemHeaderPrefixes);
+  deserialize(options.ResourceDir);
+  deserialize(options.ModuleCachePath);
+  deserialize(options.ModuleUserBuildPath);
+  deserialize(options.PrebuiltModuleFiles);
+  deserialize(options.PrebuiltModulePaths);
+  deserialize(options.ModuleFormat);
+  deserialize(options.DisableModuleHash);
+  deserialize(options.ImplicitModuleMaps);
+  deserialize(options.ModuleMapFileHomeIsCwd);
+  deserialize(options.ModuleCachePruneInterval);
+  deserialize(options.ModuleCachePruneAfter);
+  deserialize(options.BuildSessionTimestamp);
+  deserialize(options.VFSOverlayFiles);
+  deserialize(options.UseBuiltinIncludes);
+  deserialize(options.UseStandardSystemIncludes);
+  deserialize(options.UseStandardCXXIncludes);
+  deserialize(options.UseLibcxx);
+  deserialize(options.Verbose);
+  deserialize(options.ModulesValidateOncePerBuildSession);
+  deserialize(options.ModulesValidateSystemHeaders);
+  deserialize(options.ValidateASTInputFilesContent);
+  deserialize(options.UseDebugInfo);
+  deserialize(options.ModulesValidateDiagnosticOptions);
+  deserialize(options.ModulesHashContent);
+  deserialize(options.ModulesStrictContextHash);
+}
+
+void deserialize(CompilerInstance &CI) {
+  deserialize(CI.getLangOpts());
+  deserialize(CI.getPreprocessor().getPreprocessorOpts());
+  deserialize(CI.getHeaderSearchOpts());
 }
 
 //===----------------------------------------------------------------------===//
@@ -429,7 +775,7 @@ ClangExpressionParser::ClangExpressionParser(
 
   // 5. Set language options.
   lldb::LanguageType language = expr.Language();
-  LangOptions &lang_opts = m_compiler->getLangOpts();
+  LangOptions lang_opts = m_compiler->getLangOpts();
 
   switch (language) {
   case lldb::eLanguageTypeC:
@@ -518,11 +864,107 @@ ClangExpressionParser::ClangExpressionParser(
 
     // The Darwin libc expects this macro to be set.
     lang_opts.GNUCVersion = 40201;
-
-    SetupModuleHeaderPaths(m_compiler.get(), m_include_directories,
-                           target_sp);
   }
 
+  SetupModuleHeaderPaths(m_compiler.get(), m_include_directories);
+
+    CompilerInvocation inv;
+  std::vector<std::string> m = {
+      "-cc1",
+      "-triple",
+      "x86_64-pc-windows-msvc19.25.28614",
+      "-fmath-errno",
+      "-fno-rounding-math",
+      "-masm-verbose",
+      "-mconstructor-aliases",
+      "-munwind-tables",
+      "-target-cpu",
+      "x86-64",
+      "-gcodeview",
+      "-debug-info-kind=limited",
+      "-v",
+      "-resource-dir",
+      "C:\\Program Files\\LLVM\\lib\\clang\\10.0.0",
+      "-internal-isystem",
+      "C:\\Program Files\\LLVM\\lib\\clang\\10.0.0\\include",
+      "-internal-isystem",
+      "C:\\Program Files (x86)\\Microsoft Visual "
+      "Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\include",
+      "-internal-isystem",
+      "C:\\Program Files (x86)\\Microsoft Visual "
+      "Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\atlmfc\\include",
+      "-internal-isystem",
+      "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.18362.0\\ucrt",
+      "-internal-isystem",
+      "C:\\Program Files (x86)\\Windows "
+      "Kits\\10\\include\\10.0.18362.0\\shared",
+      "-internal-isystem",
+      "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.18362.0\\um",
+      "-internal-isystem",
+      "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.18362.0\\winrt",
+      "-fdeprecated-macro",
+      "-fdebug-compilation-dir",
+      "C:\\Users\\idowe\\Desktop\\temp",
+      "-ferror-limit",
+      "19",
+      "-fmessage-length",
+      "120",
+      "-fno-use-cxa-atexit",
+      "-fms-extensions",
+      "-fms-compatibility",
+      "-fms-compatibility-version=19.25.28614",
+      "-std=c++14",
+      "-fdelayed-template-parsing",
+      "-fobjc-runtime=gcc",
+      "-fcxx-exceptions",
+      "-fexceptions",
+      "-fdiagnostics-show-option",
+      "-fcolor-diagnostics",
+      "-faddrsig",
+      "-x",
+      "c++"};
+  std::vector<const char *> v;
+
+  for (const auto &arg : m) {
+    v.push_back(arg.c_str());
+  }
+
+  
+  auto diag = CompilerInstance::createDiagnostics(new DiagnosticOptions);
+  bool b =
+      CompilerInvocation::CreateFromArgs(inv, ArrayRef<const char *>(v), *diag);
+  assert(b);
+  g_index = 0;
+  m_compiler->getLangOpts() = *inv.getLangOpts();
+  
+  m_compiler->getHeaderSearchOptsPtr() = inv.getHeaderSearchOptsPtr();
+  m_compiler->getHeaderSearchOpts() = inv.getHeaderSearchOpts();
+  m_compiler->getPreprocessorOpts() = inv.getPreprocessorOpts();
+  
+      std::ifstream is(exe_scope->CalculateTarget()->GetExecutableModule()->GetFileSpec().GetPath(), std::ifstream::binary);
+  if (is) {
+    // get length of file:
+    is.seekg(0, is.end);
+    int length = is.tellg();
+    is.seekg(0, is.beg);
+    std::vector<char> exe_data(length);
+    is.read(exe_data.data(), exe_data.size());
+    std::error_code ec;
+    auto memoryBuffer = MemoryBufferRef(toStringRef(
+        llvm::ArrayRef<uint8_t>((uint8_t *)exe_data.data(), exe_data.size())), "");
+    object::COFFObjectFile coff(memoryBuffer, ec);
+    for (const auto& section : coff.sections()) {
+      if (section.getName() && section.getName().get() == ".llvm_co") {
+        std::vector<char> serialized_command = std::vector<char>(
+            exe_data.begin() + section.getAddress(),
+            exe_data.begin() + section.getSize() + section.getAddress());
+        g_index = 0;
+        g_deserailizeCompilerInvocation = serialized_command;
+
+        deserialize(*m_compiler);
+      }
+    }
+  }
   if (process_sp && lang_opts.ObjC) {
     if (auto *runtime = ObjCLanguageRuntime::Get(*process_sp)) {
       if (runtime->GetRuntimeVersion() ==
@@ -549,7 +991,7 @@ ClangExpressionParser::ClangExpressionParser(
   m_compiler->getCodeGenOpts().EmitDeclMetadata = true;
   m_compiler->getCodeGenOpts().InstrumentFunctions = false;
   m_compiler->getCodeGenOpts().setFramePointer(
-                                    CodeGenOptions::FramePointerKind::All);
+      CodeGenOptions::FramePointerKind::All);
   if (generate_debug_info)
     m_compiler->getCodeGenOpts().setDebugInfo(codegenoptions::FullDebugInfo);
   else
@@ -873,6 +1315,18 @@ unsigned ClangExpressionParser::Parse(DiagnosticManager &diagnostic_manager) {
   return ParseInternal(diagnostic_manager);
 }
 
+class clang::PreprocessorOptions;
+
+std::vector<std::string> splitBySpace(const std::string &str) {
+  std::vector<std::string> res;
+  std::istringstream iss(str);
+  std::string s;
+  while (std::getline(iss, s, ' ')) {
+    res.push_back(s);
+  }
+  return res;
+}
+
 unsigned
 ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                      CodeCompleteConsumer *completion_consumer,
@@ -886,10 +1340,19 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   adapter->ResetManager(&diagnostic_manager);
 
   const char *expr_text = m_expr.Text();
+  std::string text = expr_text;
+  std::string stringToSearch = "#include <vector>";
+  int a = text.find(stringToSearch);
+  if (std::string::npos != a) {
+    text.replace(a, stringToSearch.size(), "");
+    text = stringToSearch + "\n" + text;
+  }
+  expr_text = text.c_str();
+
+
 
   clang::SourceManager &source_mgr = m_compiler->getSourceManager();
   bool created_main_file = false;
-
   // Clang wants to do completion on a real file known by Clang's file manager,
   // so we have to create one to make this work.
   // TODO: We probably could also simulate to Clang's file manager that there
@@ -921,8 +1384,7 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
           if (auto fileEntry =
                   m_compiler->getFileManager().getFile(result_path)) {
             source_mgr.setMainFileID(source_mgr.createFileID(
-                *fileEntry,
-                SourceLocation(), SrcMgr::C_User));
+                *fileEntry, SourceLocation(), SrcMgr::C_User));
             created_main_file = true;
           }
         }
@@ -1279,50 +1741,7 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
 
     if (execution_policy == eExecutionPolicyAlways ||
         (execution_policy != eExecutionPolicyTopLevel && !can_interpret)) {
-      if (m_expr.NeedsValidation() && process) {
-        if (!process->GetDynamicCheckers()) {
-          ClangDynamicCheckerFunctions *dynamic_checkers =
-              new ClangDynamicCheckerFunctions();
-
-          DiagnosticManager install_diagnostics;
-
-          if (!dynamic_checkers->Install(install_diagnostics, exe_ctx)) {
-            if (install_diagnostics.Diagnostics().size())
-              err.SetErrorString(install_diagnostics.GetString().c_str());
-            else
-              err.SetErrorString("couldn't install checkers, unknown error");
-
-            return err;
-          }
-
-          process->SetDynamicCheckers(dynamic_checkers);
-
-          LLDB_LOGF(log, "== [ClangExpressionParser::PrepareForExecution] "
-                         "Finished installing dynamic checkers ==");
-        }
-
-        if (auto *checker_funcs = llvm::dyn_cast<ClangDynamicCheckerFunctions>(
-                process->GetDynamicCheckers())) {
-          IRDynamicChecks ir_dynamic_checks(*checker_funcs,
-                                            function_name.AsCString());
-
-          llvm::Module *module = execution_unit_sp->GetModule();
-          if (!module || !ir_dynamic_checks.runOnModule(*module)) {
-            err.SetErrorToGenericError();
-            err.SetErrorString("Couldn't add dynamic checks to the expression");
-            return err;
-          }
-
-          if (custom_passes.LatePasses) {
-            LLDB_LOGF(log,
-                      "%s - Running Late IR Passes from LanguageRuntime on "
-                      "expression module '%s'",
-                      __FUNCTION__, m_expr.FunctionName());
-
-            custom_passes.LatePasses->run(*module);
-          }
-        }
-      }
+      
     }
 
     if (execution_policy == eExecutionPolicyAlways ||

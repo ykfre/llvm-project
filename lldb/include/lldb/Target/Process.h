@@ -1220,7 +1220,7 @@ public:
   /// \see lldb::StateType
   lldb::StateType GetState();
 
-  lldb::ExpressionResults
+  virtual lldb::ExpressionResults
   RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_plan_sp,
                 const EvaluateExpressionOptions &options,
                 DiagnosticManager &diagnostic_manager);

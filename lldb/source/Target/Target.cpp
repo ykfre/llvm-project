@@ -203,6 +203,8 @@ const lldb::ProcessSP &Target::CreateProcess(ListenerSP listener_sp,
 
 const lldb::ProcessSP &Target::GetProcessSP() const { return m_process_sp; }
 
+lldb::ProcessSP &Target::GetProcessSP() { return m_process_sp; }
+
 lldb::REPLSP Target::GetREPL(Status &err, lldb::LanguageType language,
                              const char *repl_options, bool can_create) {
   if (language == eLanguageTypeUnknown) {
@@ -2373,6 +2375,16 @@ ExpressionResults Target::EvaluateExpression(
                                  result_valobj_sp, error, fixed_expression,
                                  nullptr, // Module
                                  ctx_obj);
+
+    lldb_private::Log *log(lldb_private::GetLogIfAnyCategoriesSet(
+        LIBLLDB_LOG_EXPRESSIONS | LIBLLDB_LOG_STEP));
+    if (log)
+    {
+      if (!error.Success()) {
+        LLDB_LOGF(log,
+                  "== Failed evaluate expression %s ==", error.AsCString());
+      }
+    }
   }
 
   return execution_results;

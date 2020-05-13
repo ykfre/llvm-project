@@ -4603,7 +4603,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
   ExpressionResults return_value = eExpressionSetupError;
 
   std::lock_guard<std::mutex> run_thread_plan_locker(m_run_thread_plan_lock);
-
+  
   if (!thread_plan_sp) {
     diagnostic_manager.PutString(
         eDiagnosticSeverityError,

@@ -1447,7 +1447,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
 
   // Try the modules next.
   if (!context.m_found.function_with_type_info)
-    LookupInModulesDeclVendor(context, name, current_id);
+    //LookupInModulesDeclVendor(context, name, current_id);
 
   if (target && !context.m_found.variable && !namespace_decl) {
     // We couldn't find a non-symbol variable for this.  Now we'll hunt for a

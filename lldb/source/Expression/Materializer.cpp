@@ -435,7 +435,6 @@ public:
 
     if (!scope)
       scope = map.GetBestExecutionContextScope();
-
     lldb::ValueObjectSP valobj_sp =
         ValueObjectVariable::Create(scope, m_variable_sp);
 
