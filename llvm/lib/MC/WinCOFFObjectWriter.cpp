@@ -47,6 +47,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <fstream>
 
 using namespace llvm;
 using llvm::support::endian::write32le;
@@ -56,6 +57,7 @@ using llvm::support::endian::write32le;
 namespace {
 
 using name = SmallString<COFF::NameSize>;
+extern std::vector<char> g_serailizeCompilerInvocation;
 
 enum AuxiliaryType {
   ATWeakExternal,
@@ -147,6 +149,7 @@ public:
 
   bool EmitAddrsigSection = false;
   MCSectionCOFF *AddrsigSection;
+  MCSectionCOFF *CommandLineSection;
   std::vector<const MCSymbol *> AddrsigSyms;
 
   WinCOFFObjectWriter(std::unique_ptr<MCWinCOFFObjectTargetWriter> MOTW,
@@ -667,6 +670,10 @@ void WinCOFFObjectWriter::executePostLayoutBinding(MCAssembler &Asm,
     Asm.registerSection(*AddrsigSection);
   }
 
+  CommandLineSection = Asm.getContext().getCOFFSection(
+      ".llvm_command", COFF::IMAGE_SCN_MEM_DISCARDABLE,
+      SectionKind::getMetadata());
+  Asm.registerSection(*CommandLineSection);
   // "Define" each section & symbol. This creates section & symbol
   // entries in the staging area.
   for (const auto &Section : Asm)
@@ -952,7 +959,6 @@ void WinCOFFObjectWriter::assignFileOffsets(MCAssembler &Asm,
 uint64_t WinCOFFObjectWriter::writeObject(MCAssembler &Asm,
                                           const MCAsmLayout &Layout) {
   uint64_t StartOffset = W.OS.tell();
-
   if (Sections.size() > INT32_MAX)
     report_fatal_error(
         "PE COFF object files can't have more than 2147483647 sections");
@@ -1048,6 +1054,25 @@ uint64_t WinCOFFObjectWriter::writeObject(MCAssembler &Asm,
              "executePostLayoutBinding!");
       encodeULEB128(SectionMap[TargetSection]->Symbol->getIndex(), OS);
     }
+  }
+
+    if (CommandLineSection) {
+    auto Frag = new MCDataFragment(CommandLineSection);
+    Frag->setLayoutOrder(0);
+    raw_svector_ostream OS(Frag->getContents());
+    std::ifstream is("commands", std::ifstream::binary);
+    if (is) {
+      // get length of file:
+      is.seekg(0, is.end);
+      int length = is.tellg();
+      is.seekg(0, is.beg);
+      std::vector<char> compilerInvocationSerialized(length);
+      is.read(compilerInvocationSerialized.data(),
+              compilerInvocationSerialized.size());
+      OS.write(compilerInvocationSerialized.data(),
+               compilerInvocationSerialized.size());
+    }
+   
   }
 
   assignFileOffsets(Asm, Layout);
