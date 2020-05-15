@@ -395,6 +395,10 @@ public:
 
   static ConstString &GetStaticBroadcasterClass();
 
+  std::string getPath() { return m_path; }
+  void setPath(const std::string &path) { m_path = path; }
+  std::string m_path;
+
   ConstString &GetBroadcasterClass() const override {
     return GetStaticBroadcasterClass();
   }

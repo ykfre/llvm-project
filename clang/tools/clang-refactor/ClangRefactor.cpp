@@ -25,14 +25,14 @@ public:
   virtual void run(const MatchFinder::MatchResult &Result) {
     if (const auto classObject =
             Result.Nodes.getNodeAs<clang::CXXRecordDecl>("class")) {
-      if (classObject->getName() == "HeaderSearchOptions") {
+      if (classObject->getName() == "LangOptionsBase" || classObject->getName() == "LangOptions") {
         for (auto fieldIter = classObject->field_begin();
              fieldIter != classObject->field_end(); fieldIter++) {
           auto access = fieldIter->getAccess();
           if (access != AS_public) {
             continue;
           }
-          m_f << "serialize(langOptions." << fieldIter->getNameAsString() << ");" << std::endl;
+          m_f << "serialize(langOptions." << fieldIter->getNameAsString()<< ");"<< std::endl;
         }
       }
     }

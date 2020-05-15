@@ -38,7 +38,7 @@ void serialize(void *obj, size_t sizeofObj) {
                                        buff.begin(), buff.end());
 }
 
-template <typename T>
+template <typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
 void serialize(T obj) { serialize((void *)&obj, sizeof(obj)); }
 
 void serialize(const std::string &obj) {
@@ -53,7 +53,7 @@ void serialize(const HeaderSearchOptions::Entry &obj) {
   serialize((std::string)obj.Path);
   serialize(obj.IgnoreSysRoot);
   serialize(obj.IsFramework);
-  serialize(obj.Group);
+  serialize((unsigned int)obj.Group);
 }
 
 
@@ -240,6 +240,7 @@ void serialize(LangOptions &langOptions) {
   serialize(langOptions.DebuggerCastResultToId);
   serialize(langOptions.DebuggerObjCLiteral);
   serialize(langOptions.SpellChecking);
+
   serialize(langOptions.SinglePrecisionConstants);
   serialize(langOptions.FastRelaxedMath);
   serialize(langOptions.NoBitFieldTypeAlign);
@@ -260,6 +261,7 @@ void serialize(LangOptions &langOptions) {
   serialize(langOptions.InstantiationDepth);
   serialize(langOptions.ConstexprCallDepth);
   serialize(langOptions.ConstexprStepLimit);
+
   serialize(langOptions.EnableNewConstInterp);
   serialize(langOptions.BracketDepth);
   serialize(langOptions.NumLargeByValueCopy);
@@ -277,7 +279,12 @@ void serialize(LangOptions &langOptions) {
   serialize(langOptions.FixedPoint);
   serialize(langOptions.PaddingOnUnsignedFixedPoint);
   serialize(langOptions.RegisterStaticDestructors);
-  serialize((size_t)langOptions.CFRuntime);
+
+  serialize(langOptions.SanitizerBlacklistFiles);
+  serialize(langOptions.XRayAlwaysInstrumentFiles);
+  serialize(langOptions.XRayNeverInstrumentFiles);
+  serialize(langOptions.XRayAttrListFiles);
+  serialize(langOptions.ObjCConstantStringClass);
   serialize(langOptions.OverflowHandler);
   serialize(langOptions.ModuleName);
   serialize(langOptions.CurrentModule);
@@ -285,6 +292,7 @@ void serialize(LangOptions &langOptions) {
   serialize(langOptions.NoBuiltinFuncs);
   serialize(langOptions.OMPHostIRFile);
   serialize(langOptions.IsHeaderFile);
+  std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
 void serialize(PreprocessorOptions &options) {
@@ -308,9 +316,10 @@ void serialize(PreprocessorOptions &options) {
   serialize(options.RemappedFilesKeepOriginalName);
   serialize(options.RetainRemappedFileBuffers);
   serialize(options.RetainExcludedConditionalBlocks);
-  serialize(options.ObjCXXARCStandardLibrary);
+  serialize((unsigned int)options.ObjCXXARCStandardLibrary);
   serialize(options.SetUpStaticAnalyzer);
   serialize(options.DisablePragmaDebugCrash);
+  std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
 void serialize(const HeaderSearchOptions &options) {
@@ -324,6 +333,7 @@ void serialize(const HeaderSearchOptions &options) {
   serialize(options.PrebuiltModulePaths);
   serialize(options.ModuleFormat);
   serialize(options.DisableModuleHash);
+
   serialize(options.ImplicitModuleMaps);
   serialize(options.ModuleMapFileHomeIsCwd);
   serialize(options.ModuleCachePruneInterval);
@@ -331,10 +341,12 @@ void serialize(const HeaderSearchOptions &options) {
   serialize(options.BuildSessionTimestamp);
   serialize(options.VFSOverlayFiles);
   serialize(options.UseBuiltinIncludes);
+
   serialize(options.UseStandardSystemIncludes);
   serialize(options.UseStandardCXXIncludes);
   serialize(options.UseLibcxx);
   serialize(options.Verbose);
+
   serialize(options.ModulesValidateOncePerBuildSession);
   serialize(options.ModulesValidateSystemHeaders);
   serialize(options.ValidateASTInputFilesContent);
@@ -342,6 +354,7 @@ void serialize(const HeaderSearchOptions &options) {
   serialize(options.ModulesValidateDiagnosticOptions);
   serialize(options.ModulesHashContent);
   serialize(options.ModulesStrictContextHash);
+  std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
 void serialize(CompilerInvocation &CI) {

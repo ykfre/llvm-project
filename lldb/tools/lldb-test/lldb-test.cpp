@@ -158,10 +158,9 @@ public:
     GetTripleForProcess(fileSpec, triple);
     auto moduleSp = lldb::ModuleSP(
         new lldb_private::Module(fileSpec, lldb_private::ArchSpec(triple)));
-
+    setPath(fileSpec.GetPath());
     dynamic_loader->OnLoadModule(moduleSp, lldb_private::ModuleSpec(),
                                  (size_t)GetModuleHandleA("a.exe"));
-    CalculateTarget()->SetExecutableModule(moduleSp);
     auto &images = GetTarget().GetImages();
     images.Append(moduleSp);
   }
@@ -231,7 +230,10 @@ public:
     ResumeThread(g_thread.native_handle());
     return error;
   }
+
 };
+
+
 class Platform2 : public lldb_private::Platform {
   using lldb_private::Platform::Platform;
   UserIDResolver2 m_resolver;
@@ -259,6 +261,8 @@ class Platform2 : public lldb_private::Platform {
     auto listener = lldb_private::Listener::MakeListener("listen");
     return lldb::ProcessSP(new Process2(lldb::TargetSP(target), listener));
   }
+
+
 
   void CalculateTrapHandlerSymbolNames() override{};
 
@@ -508,7 +512,7 @@ int main() {
   llvm::MCJIT::Register();
   target_sp->GetProcessSP() = exe_ctx->CalculateProcess();
   lldb::ExpressionResults result = target_sp->EvaluateExpression(
-      "d+=1;signalEvent();while(1){}", exe_ctx, value, options);
+      "#include <vector>\nd+=1;signalEvent();while(1){}", exe_ctx, value, options);
   assert(lldb::eExpressionCompleted == result);
 
 }
