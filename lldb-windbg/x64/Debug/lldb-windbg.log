@@ -1,5 +1,0 @@
-﻿  Main.cpp
-C:\code\llvm-project\lldb-windbg\Main.cpp(14,15): error C2665: 'lldb_private::TargetList::CreateTarget': none of the 2 overloads could convert all the argument types
-C:\code\llvm-project\lldb\include\lldb\Target\TargetList.h(93,10): message : could be 'lldb_private::Status lldb_private::TargetList::CreateTarget(lldb_private::Debugger &,llvm::StringRef,const lldb_private::ArchSpec &,lldb_private::LoadDependentFiles,lldb::PlatformSP &,lldb::TargetSP &)'
-C:\code\llvm-project\lldb\include\lldb\Target\TargetList.h(83,10): message : or       'lldb_private::Status lldb_private::TargetList::CreateTarget(lldb_private::Debugger &,llvm::StringRef,llvm::StringRef,lldb_private::LoadDependentFiles,const lldb_private::OptionGroupPlatform *,lldb::TargetSP &)'
-C:\code\llvm-project\lldb-windbg\Main.cpp(15,49): message : while trying to match the argument list '(lldb::DebuggerSP, const char [1], nullptr, lldb_private::LoadDependentFiles, lldb::PlatformSP, lldb::TargetSP)'
