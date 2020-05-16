@@ -44,8 +44,12 @@ bool CppModuleConfiguration::analyzeFile(const FileSpec &f) {
     return m_std_inc.TrySet(posix_dir);
   }
 
-   m_c_inc.TrySet(posix_dir);
-
+  // Check for /usr/include. On Linux this might be /usr/include/bits, so
+  // we should remove that '/bits' suffix to get the actual include directory.
+  if (posix_dir.endswith("/usr/include/bits"))
+    posix_dir.consume_back("/bits");
+  if (posix_dir.endswith("/usr/include"))
+    return m_c_inc.TrySet(posix_dir);
 
   // File wasn't interesting, continue analyzing.
   return true;
@@ -53,7 +57,7 @@ bool CppModuleConfiguration::analyzeFile(const FileSpec &f) {
 
 bool CppModuleConfiguration::hasValidConfig() {
   // We all these include directories to have a valid usable configuration.
-  return true;
+  return m_c_inc.Valid() && m_std_inc.Valid();
 }
 
 CppModuleConfiguration::CppModuleConfiguration(
@@ -70,11 +74,9 @@ CppModuleConfiguration::CppModuleConfiguration(
     llvm::sys::path::append(resource_dir, GetClangResourceDir().GetPath(),
                             "include");
     m_resource_inc = resource_dir.str();
-    using namespace llvm::sys::path;
-    m_include_dirs = {m_resource_inc};
-    for (const auto& file: support_files) {
-      m_include_dirs.push_back(
-          convert_to_slash(file.GetDirectory().GetStringRef()));
-    }
+
+    // This order matches the way Clang orders these directories.
+    m_include_dirs = {m_std_inc.Get(), m_resource_inc, m_c_inc.Get()};
+    m_imported_modules = {"std"};
   }
 }

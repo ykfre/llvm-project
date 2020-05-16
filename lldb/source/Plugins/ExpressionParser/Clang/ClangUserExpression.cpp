@@ -154,7 +154,7 @@ void ClangUserExpression::ScanContext(ExecutionContext &exe_ctx, Status &err) {
     }
     m_needs_object_ptr = true;
   } else if (clang::CXXMethodDecl *method_decl =
-          ClangASTContext::DeclContextGetAsCXXMethodDecl(decl_context)) {
+                 ClangASTContext::DeclContextGetAsCXXMethodDecl(decl_context)) {
     if (m_allow_cxx && method_decl->isInstance()) {
       if (m_enforce_valid_object) {
         lldb::VariableListSP variable_list_sp(
@@ -325,8 +325,8 @@ static void ApplyObjcCastHack(std::string &expr) {
     expr.replace(offset, from.size(), to);
 }
 
-bool ClangUserExpression::SetupPersistentState(DiagnosticManager &diagnostic_manager,
-                                 ExecutionContext &exe_ctx) {
+bool ClangUserExpression::SetupPersistentState(
+    DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx) {
   if (Target *target = exe_ctx.GetTargetPtr()) {
     if (PersistentExpressionState *persistent_state =
             target->GetPersistentExpressionStateForLanguage(
@@ -450,10 +450,16 @@ CppModuleConfiguration GetModuleConfig(lldb::LanguageType language,
                                        ExecutionContext &exe_ctx) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
 
+  // Don't do anything if this is not a C++ module configuration.
+  if (!SupportsCxxModuleImport(language))
+    return LogConfigError("Language doesn't support C++ modules");
 
   Target *target = exe_ctx.GetTargetPtr();
   if (!target)
     return LogConfigError("No target");
+
+  if (!target->GetEnableImportStdModule())
+    return LogConfigError("Importing std module not enabled in settings");
 
   StackFrame *frame = exe_ctx.GetFramePtr();
   if (!frame)
@@ -888,8 +894,7 @@ lldb::ExpressionVariableSP ClangUserExpression::GetResultAfterDematerialization(
 void ClangUserExpression::ClangUserExpressionHelper::ResetDeclMap(
     ExecutionContext &exe_ctx,
     Materializer::PersistentVariableDelegate &delegate,
-    bool keep_result_in_memory,
-    ValueObject *ctx_obj) {
+    bool keep_result_in_memory, ValueObject *ctx_obj) {
   m_expr_decl_map_up.reset(new ClangExpressionDeclMap(
       keep_result_in_memory, &delegate, exe_ctx.GetTargetSP(),
       exe_ctx.GetTargetRef().GetClangASTImporter(), ctx_obj));

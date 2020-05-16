@@ -483,12 +483,14 @@ int main() {
       lldb_private::eLoadDependentsNo;
   lldb::TargetSP target_sp;
   auto &targetList = debugger->GetTargetList();
-  assert(targetList
-             .CreateTarget(*debugger, "", "", load_dependent_files, nullptr,
-                           target_sp)
-             .Success());
+
   char moduleFileName[256] = {0};
   GetModuleFileNameA(GetModuleHandleA("a.exe"), moduleFileName, 256);
+  assert(targetList
+             .CreateTarget(*debugger, moduleFileName, "", load_dependent_files,
+                           nullptr,
+                           target_sp)
+             .Success());
   lldb_private::FileSpec fileSpec(moduleFileName);
   llvm::Triple triple;
   GetTripleForProcess(fileSpec, triple);
@@ -506,7 +508,6 @@ int main() {
   options.SetDebug(false);
   options.SetCoerceToId(false);
   options.SetExecutionPolicy(lldb_private::eExecutionPolicyAlways);
-  options.SetGenerateDebugInfo(true);
   options.SetGenerateDebugInfo(true);
   options.SetTimeout(llvm::None);
   llvm::MCJIT::Register();

@@ -249,457 +249,26 @@ private:
 };
 
 static void SetupModuleHeaderPaths(CompilerInstance *compiler,
-                                   std::vector<std::string> include_directories) {
+                                   std::vector<std::string> include_directories,
+                                   lldb::TargetSP target_sp) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
 
   HeaderSearchOptions &search_opts = compiler->getHeaderSearchOpts();
+
   for (const std::string &dir : include_directories) {
     search_opts.AddPath(dir, frontend::System, false, true);
     LLDB_LOG(log, "Added user include dir: {0}", dir);
   }
-}
 
-std::vector<char> g_deserailizeCompilerInvocation;
-int g_index = 0;
+  llvm::SmallString<128> module_cache;
+  auto props = ModuleList::GetGlobalModuleListProperties();
+  props.GetClangModulesCachePath().GetPath(module_cache);
+  search_opts.ModuleCachePath = module_cache.str();
+  LLDB_LOG(log, "Using module cache path: {0}", module_cache.c_str());
 
-void* deserialize(void *obj, size_t sizeofObj) {
-  memcpy(obj, g_deserailizeCompilerInvocation.data() + g_index, sizeofObj);
+  search_opts.ResourceDir = GetClangResourceDir().GetPath();
 
-  g_index += sizeofObj;
-  return obj;
-}
-
-void deserializeAndChange(size_t& obj) {
-  deserialize(&obj, sizeof(obj));
-}
-
-void deserializeAndChange(bool &obj) { deserialize(&obj, sizeof(obj)); }
-
-void deserializeAndChange(unsigned int &obj) { deserialize(&obj, sizeof(obj)); }
-
-
-template <typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
-[[nodiscard]] T deserialize(T obj) {
-  return *(T *)deserialize(&obj, sizeof(obj));
-}
-
-
-void deserialize(std::string &obj) {
-  obj = std::string(&g_deserailizeCompilerInvocation.at(g_index));
-  g_index += obj.size() + 1;
-}
-
-void deserialize(HeaderSearchOptions::Entry &obj) {
-  deserialize(obj.Path);
-  obj.IgnoreSysRoot = deserialize(obj.IgnoreSysRoot);
-  obj.IsFramework = deserialize(obj.IsFramework);
-  obj.Group = (frontend::IncludeDirGroup)deserialize((int)obj.Group);
-}
-
-template <typename T> void deserialize(std::vector<T> &obj) {
-  size_t objectsNum = 0;
-  deserializeAndChange(objectsNum);
-  for (int i = 0; i < objectsNum;i++) {
-    T item;
-    deserialize(item);
-    obj.push_back(item);
-  }
-}
-
-
-void deserialize(HeaderSearchOptions::SystemHeaderPrefix &obj) {
-  deserialize(obj.Prefix);
-  deserializeAndChange(obj.IsSystemHeader);
-}
-
-
-void deserialize(std::vector<HeaderSearchOptions::SystemHeaderPrefix> &obj) {
-  size_t objectsNum = 0;
-  deserializeAndChange(objectsNum);
-  for (int i = 0; i < objectsNum; i++) {
-    HeaderSearchOptions::SystemHeaderPrefix systemPrefix("",false);
-    deserialize(systemPrefix);
-    obj.push_back(systemPrefix);
-  }
-}
-
-void deserialize(std::vector<HeaderSearchOptions::Entry> &obj) {
-  size_t objectsNum = 0;
-  deserializeAndChange(objectsNum);
-  for (int i = 0; i < objectsNum; i++) {
-    HeaderSearchOptions::Entry entry("", frontend::IncludeDirGroup::Quoted, true,
-                               true);
-    deserialize(entry);
-    obj.push_back(entry);
-  }
-}
-
-template <typename T, typename Y> void deserialize(std::map<T, Y> &obj) {
-  size_t objectsNum = 0;
-  deserializeAndChange(objectsNum);
-  for (int i = 0; i < objectsNum; i++) {
-    T key;
-    deserialize(key);
-    Y value;
-    deserialize(value);
-    obj[key] = value;
-  }
-}
-
-void deserialize(std::vector<std::pair<std::string, bool>> &obj) {
-  size_t objectsNum = 0;
-  deserializeAndChange(objectsNum);
-  for (int i = 0; i < objectsNum; i++) {
-    std::string first;
-    bool second = false;
-    deserialize(first);
-    deserializeAndChange(second);
-
-    obj.push_back(std::make_pair(first, second));
-  }
-}
-
-void deserialize(LangOptions &langOptions) {
-  langOptions.C99 = deserialize(langOptions.C99);
-  langOptions.C11 = deserialize(langOptions.C11);
-  langOptions.C17 = deserialize(langOptions.C17);
-  langOptions.C2x = deserialize(langOptions.C2x);
-  langOptions.MSVCCompat = deserialize(langOptions.MSVCCompat);
-  langOptions.MicrosoftExt = deserialize(langOptions.MicrosoftExt);
-  langOptions.AsmBlocks = deserialize(langOptions.AsmBlocks);
-  langOptions.Borland = deserialize(langOptions.Borland);
-  langOptions.CPlusPlus = deserialize(langOptions.CPlusPlus);
-  langOptions.CPlusPlus11 = deserialize(langOptions.CPlusPlus11);
-  langOptions.CPlusPlus14 = deserialize(langOptions.CPlusPlus14);
-  langOptions.CPlusPlus17 = deserialize(langOptions.CPlusPlus17);
-  langOptions.CPlusPlus2a = deserialize(langOptions.CPlusPlus2a);
-  langOptions.ObjC = deserialize(langOptions.ObjC);
-  langOptions.ObjCDefaultSynthProperties =
-      deserialize(langOptions.ObjCDefaultSynthProperties);
-  langOptions.EncodeExtendedBlockSig =
-      deserialize(langOptions.EncodeExtendedBlockSig);
-  langOptions.ObjCInferRelatedResultType =
-      deserialize(langOptions.ObjCInferRelatedResultType);
-  langOptions.AppExt = deserialize(langOptions.AppExt);
-  langOptions.Trigraphs = deserialize(langOptions.Trigraphs);
-  langOptions.LineComment = deserialize(langOptions.LineComment);
-  langOptions.Bool = deserialize(langOptions.Bool);
-  langOptions.Half = deserialize(langOptions.Half);
-  langOptions.WChar = deserialize(langOptions.WChar);
-  langOptions.Char8 = deserialize(langOptions.Char8);
-  langOptions.DeclSpecKeyword = deserialize(langOptions.DeclSpecKeyword);
-  langOptions.DollarIdents = deserialize(langOptions.DollarIdents);
-  langOptions.AsmPreprocessor = deserialize(langOptions.AsmPreprocessor);
-  langOptions.GNUMode = deserialize(langOptions.GNUMode);
-  langOptions.GNUKeywords = deserialize(langOptions.GNUKeywords);
-  langOptions.GNUCVersion = deserialize(langOptions.GNUCVersion);
-  langOptions.ImplicitInt = deserialize(langOptions.ImplicitInt);
-  langOptions.Digraphs = deserialize(langOptions.Digraphs);
-  langOptions.HexFloats = deserialize(langOptions.HexFloats);
-  langOptions.CXXOperatorNames = deserialize(langOptions.CXXOperatorNames);
-  langOptions.AppleKext = deserialize(langOptions.AppleKext);
-  langOptions.PascalStrings = deserialize(langOptions.PascalStrings);
-  langOptions.WritableStrings = deserialize(langOptions.WritableStrings);
-  langOptions.ConstStrings = deserialize(langOptions.ConstStrings);
-  langOptions.ConvergentFunctions =
-      deserialize(langOptions.ConvergentFunctions);
-  langOptions.AltiVec = deserialize(langOptions.AltiVec);
-  langOptions.ZVector = deserialize(langOptions.ZVector);
-  langOptions.Exceptions = deserialize(langOptions.Exceptions);
-  langOptions.ObjCExceptions = deserialize(langOptions.ObjCExceptions);
-  langOptions.CXXExceptions = deserialize(langOptions.CXXExceptions);
-  langOptions.DWARFExceptions = deserialize(langOptions.DWARFExceptions);
-  langOptions.SjLjExceptions = deserialize(langOptions.SjLjExceptions);
-  langOptions.SEHExceptions = deserialize(langOptions.SEHExceptions);
-  langOptions.WasmExceptions = deserialize(langOptions.WasmExceptions);
-  langOptions.ExternCNoUnwind = deserialize(langOptions.ExternCNoUnwind);
-  langOptions.TraditionalCPP = deserialize(langOptions.TraditionalCPP);
-  langOptions.RTTI = deserialize(langOptions.RTTI);
-  langOptions.RTTIData = deserialize(langOptions.RTTIData);
-  langOptions.MSBitfields = deserialize(langOptions.MSBitfields);
-  langOptions.Freestanding = deserialize(langOptions.Freestanding);
-  langOptions.NoBuiltin = deserialize(langOptions.NoBuiltin);
-  langOptions.NoMathBuiltin = deserialize(langOptions.NoMathBuiltin);
-  langOptions.GNUAsm = deserialize(langOptions.GNUAsm);
-  langOptions.Coroutines = deserialize(langOptions.Coroutines);
-  langOptions.DllExportInlines = deserialize(langOptions.DllExportInlines);
-  langOptions.RelaxedTemplateTemplateArgs =
-      deserialize(langOptions.RelaxedTemplateTemplateArgs);
-  langOptions.DoubleSquareBracketAttributes =
-      deserialize(langOptions.DoubleSquareBracketAttributes);
-  langOptions.ThreadsafeStatics = deserialize(langOptions.ThreadsafeStatics);
-  langOptions.POSIXThreads = deserialize(langOptions.POSIXThreads);
-  langOptions.Blocks = deserialize(langOptions.Blocks);
-  langOptions.EmitAllDecls = deserialize(langOptions.EmitAllDecls);
-  langOptions.MathErrno = deserialize(langOptions.MathErrno);
-  langOptions.HeinousExtensions = deserialize(langOptions.HeinousExtensions);
-  langOptions.Modules = deserialize(langOptions.Modules);
-  langOptions.ModulesTS = deserialize(langOptions.ModulesTS);
-  langOptions.CPlusPlusModules = deserialize(langOptions.CPlusPlusModules);
-  langOptions.CompilingPCH = deserialize(langOptions.CompilingPCH);
-  langOptions.BuildingPCHWithObjectFile =
-      deserialize(langOptions.BuildingPCHWithObjectFile);
-  langOptions.CacheGeneratedPCH = deserialize(langOptions.CacheGeneratedPCH);
-  langOptions.ModulesDeclUse = deserialize(langOptions.ModulesDeclUse);
-  langOptions.ModulesSearchAll = deserialize(langOptions.ModulesSearchAll);
-  langOptions.ModulesStrictDeclUse =
-      deserialize(langOptions.ModulesStrictDeclUse);
-  langOptions.ModulesErrorRecovery =
-      deserialize(langOptions.ModulesErrorRecovery);
-  langOptions.ImplicitModules = deserialize(langOptions.ImplicitModules);
-  langOptions.ModulesLocalVisibility =
-      deserialize(langOptions.ModulesLocalVisibility);
-  langOptions.Optimize = deserialize(langOptions.Optimize);
-  langOptions.OptimizeSize = deserialize(langOptions.OptimizeSize);
-  langOptions.Static = deserialize(langOptions.Static);
-  langOptions.PackStruct = deserialize(langOptions.PackStruct);
-  langOptions.MaxTypeAlign = deserialize(langOptions.MaxTypeAlign);
-  langOptions.AlignDouble = deserialize(langOptions.AlignDouble);
-  langOptions.LongDoubleSize = deserialize(langOptions.LongDoubleSize);
-  langOptions.PPCIEEELongDouble = deserialize(langOptions.PPCIEEELongDouble);
-  langOptions.PICLevel = deserialize(langOptions.PICLevel);
-  langOptions.PIE = deserialize(langOptions.PIE);
-  langOptions.ROPI = deserialize(langOptions.ROPI);
-  langOptions.RWPI = deserialize(langOptions.RWPI);
-  langOptions.GNUInline = deserialize(langOptions.GNUInline);
-  langOptions.NoInlineDefine = deserialize(langOptions.NoInlineDefine);
-  langOptions.Deprecated = deserialize(langOptions.Deprecated);
-  langOptions.FastMath = deserialize(langOptions.FastMath);
-  langOptions.FiniteMathOnly = deserialize(langOptions.FiniteMathOnly);
-  langOptions.UnsafeFPMath = deserialize(langOptions.UnsafeFPMath);
-  langOptions.ObjCGCBitmapPrint = deserialize(langOptions.ObjCGCBitmapPrint);
-  langOptions.AccessControl = deserialize(langOptions.AccessControl);
-  langOptions.CharIsSigned = deserialize(langOptions.CharIsSigned);
-  langOptions.WCharSize = deserialize(langOptions.WCharSize);
-  langOptions.WCharIsSigned = deserialize(langOptions.WCharIsSigned);
-  langOptions.ShortEnums = deserialize(langOptions.ShortEnums);
-  langOptions.OpenCL = deserialize(langOptions.OpenCL);
-  langOptions.OpenCLVersion = deserialize(langOptions.OpenCLVersion);
-  langOptions.OpenCLCPlusPlus = deserialize(langOptions.OpenCLCPlusPlus);
-  langOptions.OpenCLCPlusPlusVersion =
-      deserialize(langOptions.OpenCLCPlusPlusVersion);
-  langOptions.NativeHalfType = deserialize(langOptions.NativeHalfType);
-  langOptions.NativeHalfArgsAndReturns =
-      deserialize(langOptions.NativeHalfArgsAndReturns);
-  langOptions.HalfArgsAndReturns = deserialize(langOptions.HalfArgsAndReturns);
-  langOptions.CUDA = deserialize(langOptions.CUDA);
-  langOptions.HIP = deserialize(langOptions.HIP);
-  langOptions.OpenMP = deserialize(langOptions.OpenMP);
-  langOptions.OpenMPSimd = deserialize(langOptions.OpenMPSimd);
-  langOptions.OpenMPUseTLS = deserialize(langOptions.OpenMPUseTLS);
-  langOptions.OpenMPIsDevice = deserialize(langOptions.OpenMPIsDevice);
-  langOptions.OpenMPCUDAMode = deserialize(langOptions.OpenMPCUDAMode);
-  langOptions.OpenMPIRBuilder = deserialize(langOptions.OpenMPIRBuilder);
-  langOptions.OpenMPCUDAForceFullRuntime =
-      deserialize(langOptions.OpenMPCUDAForceFullRuntime);
-  langOptions.OpenMPCUDANumSMs = deserialize(langOptions.OpenMPCUDANumSMs);
-  langOptions.OpenMPCUDABlocksPerSM =
-      deserialize(langOptions.OpenMPCUDABlocksPerSM);
-  langOptions.OpenMPCUDAReductionBufNum =
-      deserialize(langOptions.OpenMPCUDAReductionBufNum);
-  langOptions.OpenMPOptimisticCollapse =
-      deserialize(langOptions.OpenMPOptimisticCollapse);
-  langOptions.RenderScript = deserialize(langOptions.RenderScript);
-  langOptions.CUDAIsDevice = deserialize(langOptions.CUDAIsDevice);
-  langOptions.CUDAAllowVariadicFunctions =
-      deserialize(langOptions.CUDAAllowVariadicFunctions);
-  langOptions.CUDAHostDeviceConstexpr =
-      deserialize(langOptions.CUDAHostDeviceConstexpr);
-  langOptions.CUDADeviceApproxTranscendentals =
-      deserialize(langOptions.CUDADeviceApproxTranscendentals);
-  langOptions.GPURelocatableDeviceCode =
-      deserialize(langOptions.GPURelocatableDeviceCode);
-  langOptions.GPUAllowDeviceInit = deserialize(langOptions.GPUAllowDeviceInit);
-  langOptions.GPUMaxThreadsPerBlock =
-      deserialize(langOptions.GPUMaxThreadsPerBlock);
-  langOptions.SYCLIsDevice = deserialize(langOptions.SYCLIsDevice);
-  langOptions.HIPUseNewLaunchAPI = deserialize(langOptions.HIPUseNewLaunchAPI);
-  langOptions.SizedDeallocation = deserialize(langOptions.SizedDeallocation);
-  langOptions.AlignedAllocation = deserialize(langOptions.AlignedAllocation);
-  langOptions.AlignedAllocationUnavailable =
-      deserialize(langOptions.AlignedAllocationUnavailable);
-  langOptions.NewAlignOverride = deserialize(langOptions.NewAlignOverride);
-  langOptions.ConceptSatisfactionCaching =
-      deserialize(langOptions.ConceptSatisfactionCaching);
-  langOptions.ModulesCodegen = deserialize(langOptions.ModulesCodegen);
-  langOptions.ModulesDebugInfo = deserialize(langOptions.ModulesDebugInfo);
-  langOptions.ElideConstructors = deserialize(langOptions.ElideConstructors);
-  langOptions.DumpRecordLayouts = deserialize(langOptions.DumpRecordLayouts);
-  langOptions.DumpRecordLayoutsSimple =
-      deserialize(langOptions.DumpRecordLayoutsSimple);
-  langOptions.DumpVTableLayouts = deserialize(langOptions.DumpVTableLayouts);
-  langOptions.NoConstantCFStrings =
-      deserialize(langOptions.NoConstantCFStrings);
-  langOptions.InlineVisibilityHidden =
-      deserialize(langOptions.InlineVisibilityHidden);
-  langOptions.GlobalAllocationFunctionVisibilityHidden =
-      deserialize(langOptions.GlobalAllocationFunctionVisibilityHidden);
-  langOptions.ParseUnknownAnytype =
-      deserialize(langOptions.ParseUnknownAnytype);
-  langOptions.DebuggerSupport = deserialize(langOptions.DebuggerSupport);
-  langOptions.DebuggerCastResultToId =
-      deserialize(langOptions.DebuggerCastResultToId);
-  langOptions.DebuggerObjCLiteral =
-      deserialize(langOptions.DebuggerObjCLiteral);
-  langOptions.SpellChecking = deserialize(langOptions.SpellChecking);
-
-  std::cout << g_index << std::endl;
-  langOptions.SinglePrecisionConstants =
-      deserialize(langOptions.SinglePrecisionConstants);
-  langOptions.FastRelaxedMath = deserialize(langOptions.FastRelaxedMath);
-  langOptions.NoBitFieldTypeAlign =
-      deserialize(langOptions.NoBitFieldTypeAlign);
-  langOptions.HexagonQdsp6Compat = deserialize(langOptions.HexagonQdsp6Compat);
-  langOptions.ObjCAutoRefCount = deserialize(langOptions.ObjCAutoRefCount);
-  langOptions.ObjCWeakRuntime = deserialize(langOptions.ObjCWeakRuntime);
-  langOptions.ObjCWeak = deserialize(langOptions.ObjCWeak);
-  langOptions.ObjCSubscriptingLegacyRuntime =
-      deserialize(langOptions.ObjCSubscriptingLegacyRuntime);
-  langOptions.CFProtectionBranch = deserialize(langOptions.CFProtectionBranch);
-  langOptions.FakeAddressSpaceMap =
-      deserialize(langOptions.FakeAddressSpaceMap);
-  langOptions.IncludeDefaultHeader =
-      deserialize(langOptions.IncludeDefaultHeader);
-  langOptions.DeclareOpenCLBuiltins =
-      deserialize(langOptions.DeclareOpenCLBuiltins);
-  langOptions.DelayedTemplateParsing =
-      deserialize(langOptions.DelayedTemplateParsing);
-  langOptions.BlocksRuntimeOptional =
-      deserialize(langOptions.BlocksRuntimeOptional);
-  langOptions.CompleteMemberPointers =
-      deserialize(langOptions.CompleteMemberPointers);
-  langOptions.SetVisibilityForExternDecls =
-      deserialize(langOptions.SetVisibilityForExternDecls);
-  langOptions.ArrowDepth = deserialize(langOptions.ArrowDepth);
-  langOptions.InstantiationDepth = deserialize(langOptions.InstantiationDepth);
-  langOptions.ConstexprCallDepth = deserialize(langOptions.ConstexprCallDepth);
-  langOptions.ConstexprStepLimit = deserialize(langOptions.ConstexprStepLimit);
-  std::cout << g_index << std::endl;
-  langOptions.EnableNewConstInterp =
-      deserialize(langOptions.EnableNewConstInterp);
-  langOptions.BracketDepth = deserialize(langOptions.BracketDepth);
-  langOptions.NumLargeByValueCopy =
-      deserialize(langOptions.NumLargeByValueCopy);
-  langOptions.MSCompatibilityVersion =
-      deserialize(langOptions.MSCompatibilityVersion);
-  langOptions.ApplePragmaPack = deserialize(langOptions.ApplePragmaPack);
-  langOptions.RetainCommentsFromSystemHeaders =
-      deserialize(langOptions.RetainCommentsFromSystemHeaders);
-  langOptions.SanitizeAddressFieldPadding =
-      deserialize(langOptions.SanitizeAddressFieldPadding);
-  langOptions.Cmse = deserialize(langOptions.Cmse);
-  std::cout << g_index << std::endl;
-  langOptions.XRayInstrument = deserialize(langOptions.XRayInstrument);
-  langOptions.XRayAlwaysEmitCustomEvents =
-      deserialize(langOptions.XRayAlwaysEmitCustomEvents);
-  langOptions.XRayAlwaysEmitTypedEvents =
-      deserialize(langOptions.XRayAlwaysEmitTypedEvents);
-  langOptions.ForceEmitVTables = deserialize(langOptions.ForceEmitVTables);
-  langOptions.AllowEditorPlaceholders =
-      deserialize(langOptions.AllowEditorPlaceholders);
-  langOptions.FunctionAlignment = deserialize(langOptions.FunctionAlignment);
-  langOptions.FixedPoint = deserialize(langOptions.FixedPoint);
-  langOptions.PaddingOnUnsignedFixedPoint =
-      deserialize(langOptions.PaddingOnUnsignedFixedPoint);
-  langOptions.RegisterStaticDestructors =
-  deserialize(langOptions.RegisterStaticDestructors);
-  std::cout << g_index << std::endl;
-  deserialize(langOptions.SanitizerBlacklistFiles);
-  deserialize(langOptions.XRayAlwaysInstrumentFiles);
-  deserialize(langOptions.XRayNeverInstrumentFiles);
-  deserialize(langOptions.XRayAttrListFiles);
-  deserialize(langOptions.ObjCConstantStringClass);
-  deserialize(langOptions.OverflowHandler);
-
-  std::cout << g_index << std::endl;
-  deserialize(langOptions.ModuleName);
-  deserialize(langOptions.CurrentModule);
-  deserialize(langOptions.ModuleFeatures);
-  deserialize(langOptions.NoBuiltinFuncs);
-  deserialize(langOptions.OMPHostIRFile);
-  deserializeAndChange(langOptions.IsHeaderFile);
-  std::cout << g_index << std::endl;
-}
-
-void deserialize(PreprocessorOptions &options) {
-  deserialize(options.Macros);
-  deserialize(options.Includes);
-  deserialize(options.MacroIncludes);
-  deserializeAndChange(options.UsePredefines);
-  deserializeAndChange(options.DetailedRecord);
-  deserializeAndChange(options.PCHWithHdrStop);
-  deserializeAndChange(options.PCHWithHdrStopCreate);
-  deserialize(options.PCHThroughHeader);
-  deserialize(options.ImplicitPCHInclude);
-  deserialize(options.ChainedIncludes);
-  deserializeAndChange(options.DisablePCHValidation);
-  deserializeAndChange(options.AllowPCHWithCompilerErrors);
-  deserializeAndChange(options.DumpDeserializedPCHDecls);
-  deserializeAndChange(options.GeneratePreamble);
-  deserializeAndChange(options.WriteCommentListToPCH);
-  deserializeAndChange(options.SingleFileParseMode);
-  deserializeAndChange(options.LexEditorPlaceholders);
-  deserializeAndChange(options.RemappedFilesKeepOriginalName);
-  deserializeAndChange(options.RetainRemappedFileBuffers);
-  deserializeAndChange(options.RetainExcludedConditionalBlocks);
-  options.ObjCXXARCStandardLibrary = (ObjCXXARCStandardLibraryKind)deserialize((int)(options.ObjCXXARCStandardLibrary));
-  deserializeAndChange(options.SetUpStaticAnalyzer);
-  deserializeAndChange(options.DisablePragmaDebugCrash);
-  std::cout << g_index << std::endl;
-}
-
-void deserialize(HeaderSearchOptions &options) {
-
-  std::cout << g_index << std::endl;
-  deserialize(options.Sysroot);
-  deserialize(options.UserEntries);
-  deserialize(options.SystemHeaderPrefixes);
-  deserialize(options.ResourceDir);
-
-  std::cout << g_index << std::endl;
-  deserialize(options.ModuleCachePath);
-  deserialize(options.ModuleUserBuildPath);
-  deserialize(options.PrebuiltModuleFiles);
-
-  std::cout << g_index << std::endl;
-  deserialize(options.PrebuiltModulePaths);
-  deserialize(options.ModuleFormat);
-  options.DisableModuleHash = deserialize(options.DisableModuleHash);
-
-  std::cout << g_index << std::endl;
-  options.ImplicitModuleMaps = deserialize(options.ImplicitModuleMaps);
-  options.ModuleMapFileHomeIsCwd = deserialize(options.ModuleMapFileHomeIsCwd);
-  options.ModuleCachePruneInterval = deserialize(options.ModuleCachePruneInterval);
-  options.ModuleCachePruneAfter = deserialize(options.ModuleCachePruneAfter);
-  options.BuildSessionTimestamp = deserialize(options.BuildSessionTimestamp);
-  deserialize(options.VFSOverlayFiles);
-  options.UseBuiltinIncludes = deserialize(options.UseBuiltinIncludes);
-  std::cout << g_index << std::endl;
-  options.UseStandardSystemIncludes = deserialize(
-      options.UseStandardSystemIncludes);
-  options.UseStandardCXXIncludes = deserialize(options.UseStandardCXXIncludes);
-  options.UseLibcxx = deserialize(options.UseLibcxx);
-  options.Verbose = deserialize(options.Verbose);
-
-  std::cout << g_index << std::endl;
-  options.ModulesValidateOncePerBuildSession = deserialize(
-      options.ModulesValidateOncePerBuildSession);
-  options.ModulesValidateSystemHeaders = deserialize(
-      options.ModulesValidateSystemHeaders);
-  options.ValidateASTInputFilesContent = deserialize(
-      options.ValidateASTInputFilesContent);
-  options.UseDebugInfo = deserialize(options.UseDebugInfo);
-  options.ModulesValidateDiagnosticOptions = deserialize(
-      options.ModulesValidateDiagnosticOptions);
-  options.ModulesHashContent = deserialize(options.ModulesHashContent);
-  options.ModulesStrictContextHash = deserialize(options.ModulesStrictContextHash);
-  std::cout << g_index << std::endl;
-}
-
-void deserialize(CompilerInstance &CI) {
-  deserialize(CI.getLangOpts());
-  deserialize(CI.getPreprocessorOpts());
-  deserialize(CI.getHeaderSearchOpts());
+  search_opts.ImplicitModuleMaps = true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -868,100 +437,10 @@ ClangExpressionParser::ClangExpressionParser(
 
   // 5. Set language options.
   lldb::LanguageType language = expr.Language();
-  LangOptions lang_opts = m_compiler->getLangOpts();
+  
 
-  switch (language) {
-  case lldb::eLanguageTypeC:
-  case lldb::eLanguageTypeC89:
-  case lldb::eLanguageTypeC99:
-  case lldb::eLanguageTypeC11:
-    // FIXME: the following language option is a temporary workaround,
-    // to "ask for C, get C++."
-    // For now, the expression parser must use C++ anytime the language is a C
-    // family language, because the expression parser uses features of C++ to
-    // capture values.
-    lang_opts.CPlusPlus = true;
-    break;
-  case lldb::eLanguageTypeObjC:
-    lang_opts.ObjC = true;
-    // FIXME: the following language option is a temporary workaround,
-    // to "ask for ObjC, get ObjC++" (see comment above).
-    lang_opts.CPlusPlus = true;
 
-    // Clang now sets as default C++14 as the default standard (with
-    // GNU extensions), so we do the same here to avoid mismatches that
-    // cause compiler error when evaluating expressions (e.g. nullptr not found
-    // as it's a C++11 feature). Currently lldb evaluates C++14 as C++11 (see
-    // two lines below) so we decide to be consistent with that, but this could
-    // be re-evaluated in the future.
-    lang_opts.CPlusPlus11 = true;
-    break;
-  case lldb::eLanguageTypeC_plus_plus:
-  case lldb::eLanguageTypeC_plus_plus_11:
-  case lldb::eLanguageTypeC_plus_plus_14:
-    lang_opts.CPlusPlus11 = true;
-    m_compiler->getHeaderSearchOpts().UseLibcxx = true;
-    LLVM_FALLTHROUGH;
-  case lldb::eLanguageTypeC_plus_plus_03:
-    lang_opts.CPlusPlus = true;
-    if (process_sp)
-      lang_opts.ObjC =
-          process_sp->GetLanguageRuntime(lldb::eLanguageTypeObjC) != nullptr;
-    break;
-  case lldb::eLanguageTypeObjC_plus_plus:
-  case lldb::eLanguageTypeUnknown:
-  default:
-    lang_opts.ObjC = true;
-    lang_opts.CPlusPlus = true;
-    lang_opts.CPlusPlus11 = true;
-    m_compiler->getHeaderSearchOpts().UseLibcxx = true;
-    break;
-  }
-
-  lang_opts.Bool = true;
-  lang_opts.WChar = true;
-  lang_opts.Blocks = true;
-  lang_opts.DebuggerSupport =
-      true; // Features specifically for debugger clients
-  if (expr.DesiredResultType() == Expression::eResultTypeId)
-    lang_opts.DebuggerCastResultToId = true;
-
-  lang_opts.CharIsSigned = ArchSpec(m_compiler->getTargetOpts().Triple.c_str())
-                               .CharIsSignedByDefault();
-
-  // Spell checking is a nice feature, but it ends up completing a lot of types
-  // that we didn't strictly speaking need to complete. As a result, we spend a
-  // long time parsing and importing debug information.
-  lang_opts.SpellChecking = false;
-
-  auto *clang_expr = dyn_cast<ClangUserExpression>(&m_expr);
-  if (clang_expr && clang_expr->DidImportCxxModules()) {
-    LLDB_LOG(log, "Adding lang options for importing C++ modules");
-
-    lang_opts.Modules = true;
-    // We want to implicitly build modules.
-    lang_opts.ImplicitModules = true;
-    // To automatically import all submodules when we import 'std'.
-    lang_opts.ModulesLocalVisibility = false;
-
-    // We use the @import statements, so we need this:
-    // FIXME: We could use the modules-ts, but that currently doesn't work.
-    lang_opts.ObjC = true;
-
-    // Options we need to parse libc++ code successfully.
-    // FIXME: We should ask the driver for the appropriate default flags.
-    lang_opts.GNUMode = true;
-    lang_opts.GNUKeywords = true;
-    lang_opts.DoubleSquareBracketAttributes = true;
-    lang_opts.CPlusPlus11 = true;
-
-    // The Darwin libc expects this macro to be set.
-    lang_opts.GNUCVersion = 40201;
-  }
-
-  SetupModuleHeaderPaths(m_compiler.get(), m_include_directories);
-
-    CompilerInvocation inv;
+  CompilerInvocation inv;
   std::vector<std::string> m = {
       "-cc1",
       "-triple",
@@ -995,6 +474,8 @@ ClangExpressionParser::ClangExpressionParser(
       "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.18362.0\\um",
       "-internal-isystem",
       "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.18362.0\\winrt",
+      "-internal-isystem",
+      "C:\\Users\\idowe\\source\\repos\\Project1\\Project1",
       "-fdeprecated-macro",
       "-fdebug-compilation-dir",
       "C:\\Users\\idowe\\Desktop\\temp",
@@ -1014,6 +495,7 @@ ClangExpressionParser::ClangExpressionParser(
       "-fdiagnostics-show-option",
       "-fcolor-diagnostics",
       "-faddrsig",
+      "-Dme=9",
       "-x",
       "c++"};
   std::vector<const char *> v;
@@ -1022,66 +504,15 @@ ClangExpressionParser::ClangExpressionParser(
     v.push_back(arg.c_str());
   }
 
-  
   auto diag = CompilerInstance::createDiagnostics(new DiagnosticOptions);
   bool b =
       CompilerInvocation::CreateFromArgs(inv, ArrayRef<const char *>(v), *diag);
   assert(b);
-  g_index = 0;
-  
-  /*
-    std::ifstream is(exe_scope->CalculateProcess()->getPath(),
-                std::ifstream::binary);
-  if (is) {
-    // get length of file:
-    is.seekg(0, is.end);
-    int length = is.tellg();
-    is.seekg(0, is.beg);
-    std::vector<char> exe_data(length);
-    is.read(exe_data.data(), exe_data.size());
-    std::error_code ec;
-    auto memoryBuffer = MemoryBufferRef(toStringRef(
-        llvm::ArrayRef<uint8_t>((uint8_t *)exe_data.data(), exe_data.size())), "");
-    object::COFFObjectFile coff(memoryBuffer, ec);
-    for (const auto &section : coff.sections()) {
-      auto name = section.getName();
-      if (section.getName()) {
-        std::cout << name.get().str();
-      }
-    }
-    for (const auto& section : coff.sections()) {
-      if (section.getName() && section.getName().get() == ".llvm_co") {
-        auto contents = section.getContents();
-        if (contents) {
-          auto trueContents = contents.get();
-          std::vector<char> serialized_command = std::vector<char>(
-              trueContents.begin(), trueContents.end());
-          g_index = 0;
-          g_deserailizeCompilerInvocation = serialized_command;
-          deserialize(*m_compiler);
-        }
-      }
-    }
-  }
-  */
   m_compiler->getLangOpts() = *inv.getLangOpts();
-  m_compiler->getHeaderSearchOptsPtr() = inv.getHeaderSearchOptsPtr();
   m_compiler->getHeaderSearchOpts() = inv.getHeaderSearchOpts();
   m_compiler->getPreprocessorOpts() = inv.getPreprocessorOpts();
 
-  if (process_sp && lang_opts.ObjC) {
-    if (auto *runtime = ObjCLanguageRuntime::Get(*process_sp)) {
-      if (runtime->GetRuntimeVersion() ==
-          ObjCLanguageRuntime::ObjCRuntimeVersions::eAppleObjC_V2)
-        lang_opts.ObjCRuntime.set(ObjCRuntime::MacOSX, VersionTuple(10, 7));
-      else
-        lang_opts.ObjCRuntime.set(ObjCRuntime::FragileMacOSX,
-                                  VersionTuple(10, 7));
-
-      if (runtime->HasNewLiteralsAndIndexing())
-        lang_opts.DebuggerObjCLiteral = true;
-    }
-  }
+  LangOptions &lang_opts = m_compiler->getLangOpts();
 
   lang_opts.ThreadsafeStatics = false;
   lang_opts.AccessControl = false; // Debuggers get universal access
@@ -1419,18 +850,6 @@ unsigned ClangExpressionParser::Parse(DiagnosticManager &diagnostic_manager) {
   return ParseInternal(diagnostic_manager);
 }
 
-class clang::PreprocessorOptions;
-
-std::vector<std::string> splitBySpace(const std::string &str) {
-  std::vector<std::string> res;
-  std::istringstream iss(str);
-  std::string s;
-  while (std::getline(iss, s, ' ')) {
-    res.push_back(s);
-  }
-  return res;
-}
-
 unsigned
 ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                      CodeCompleteConsumer *completion_consumer,
@@ -1444,7 +863,8 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   adapter->ResetManager(&diagnostic_manager);
 
   const char *expr_text = m_expr.Text();
-  std::string text = expr_text;
+
+    std::string text = expr_text;
   std::string stringToSearch = "#include <vector>";
   int a = text.find(stringToSearch);
   if (std::string::npos != a) {
@@ -1453,10 +873,9 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   }
   expr_text = text.c_str();
 
-
-
   clang::SourceManager &source_mgr = m_compiler->getSourceManager();
   bool created_main_file = false;
+
   // Clang wants to do completion on a real file known by Clang's file manager,
   // so we have to create one to make this work.
   // TODO: We probably could also simulate to Clang's file manager that there
@@ -1845,7 +1264,6 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
 
     if (execution_policy == eExecutionPolicyAlways ||
         (execution_policy != eExecutionPolicyTopLevel && !can_interpret)) {
-      
     }
 
     if (execution_policy == eExecutionPolicyAlways ||

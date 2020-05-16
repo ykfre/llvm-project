@@ -473,7 +473,7 @@ if( MSVC )
   set(strdup "_strdup")
 
   # See if the DIA SDK is available and usable.
-  set(MSVC_DIA_SDK_DIR "$ENV{VSINSTALLDIR}DIA SDK" CACHE PATH
+  set(MSVC_DIA_SDK_DIR "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/DIA SDK" CACHE PATH
       "Path to the DIA SDK")
 
   # Due to a bug in MSVC 2013's installation software, it is possible
