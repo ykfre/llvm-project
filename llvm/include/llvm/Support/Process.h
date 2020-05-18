@@ -69,6 +69,7 @@ public:
   /// allocated space.
   static size_t GetMallocUsage();
 
+
   /// This static function will set \p user_time to the amount of CPU time
   /// spent in user (non-kernel) mode and \p sys_time to the amount of CPU
   /// time spent in system (kernel) mode.  If the operating system does not

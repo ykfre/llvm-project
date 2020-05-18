@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
@@ -38,6 +39,7 @@
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Process.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -48,6 +50,9 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include "llvm/Support/Process.h"
+
+
 
 using namespace llvm;
 using llvm::support::endian::write32le;
@@ -956,6 +961,8 @@ void WinCOFFObjectWriter::assignFileOffsets(MCAssembler &Asm,
   Header.PointerToSymbolTable = Offset;
 }
 
+extern std::vector<char> read_serialize();
+
 uint64_t WinCOFFObjectWriter::writeObject(MCAssembler &Asm,
                                           const MCAsmLayout &Layout) {
   uint64_t StartOffset = W.OS.tell();
@@ -1060,18 +1067,11 @@ uint64_t WinCOFFObjectWriter::writeObject(MCAssembler &Asm,
     auto Frag = new MCDataFragment(CommandLineSection);
     Frag->setLayoutOrder(0);
     raw_svector_ostream OS(Frag->getContents());
-    std::ifstream is("commands", std::ifstream::binary);
-    if (is) {
-      // get length of file:
-      is.seekg(0, is.end);
-      int length = is.tellg();
-      is.seekg(0, is.beg);
-      std::vector<char> compilerInvocationSerialized(length);
-      is.read(compilerInvocationSerialized.data(),
-              compilerInvocationSerialized.size());
-      OS.write(compilerInvocationSerialized.data(),
-               compilerInvocationSerialized.size());
-    }
+
+    std::vector<char> compilerInvocationSerialized = read_serialize();
+
+    OS.write(compilerInvocationSerialized.data(),
+            compilerInvocationSerialized.size());
    
   }
 

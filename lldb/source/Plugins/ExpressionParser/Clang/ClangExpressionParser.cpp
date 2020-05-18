@@ -97,6 +97,9 @@
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/StringList.h"
+#include "lldb/lldb-enumerations.h"
+
+#include "lldb/Symbol/CompileUnit.h"
 
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 
@@ -549,7 +552,6 @@ void deserialize(LangOptions &langOptions) {
       deserialize(langOptions.DebuggerObjCLiteral);
   langOptions.SpellChecking = deserialize(langOptions.SpellChecking);
 
-  
   langOptions.SinglePrecisionConstants =
       deserialize(langOptions.SinglePrecisionConstants);
   langOptions.FastRelaxedMath = deserialize(langOptions.FastRelaxedMath);
@@ -580,7 +582,7 @@ void deserialize(LangOptions &langOptions) {
   langOptions.InstantiationDepth = deserialize(langOptions.InstantiationDepth);
   langOptions.ConstexprCallDepth = deserialize(langOptions.ConstexprCallDepth);
   langOptions.ConstexprStepLimit = deserialize(langOptions.ConstexprStepLimit);
-  
+
   langOptions.EnableNewConstInterp =
       deserialize(langOptions.EnableNewConstInterp);
   langOptions.BracketDepth = deserialize(langOptions.BracketDepth);
@@ -594,7 +596,7 @@ void deserialize(LangOptions &langOptions) {
   langOptions.SanitizeAddressFieldPadding =
       deserialize(langOptions.SanitizeAddressFieldPadding);
   langOptions.Cmse = deserialize(langOptions.Cmse);
-  
+
   langOptions.XRayInstrument = deserialize(langOptions.XRayInstrument);
   langOptions.XRayAlwaysEmitCustomEvents =
       deserialize(langOptions.XRayAlwaysEmitCustomEvents);
@@ -609,7 +611,7 @@ void deserialize(LangOptions &langOptions) {
       deserialize(langOptions.PaddingOnUnsignedFixedPoint);
   langOptions.RegisterStaticDestructors =
       deserialize(langOptions.RegisterStaticDestructors);
-  
+
   deserialize(langOptions.SanitizerBlacklistFiles);
   deserialize(langOptions.XRayAlwaysInstrumentFiles);
   deserialize(langOptions.XRayNeverInstrumentFiles);
@@ -617,14 +619,12 @@ void deserialize(LangOptions &langOptions) {
   deserialize(langOptions.ObjCConstantStringClass);
   deserialize(langOptions.OverflowHandler);
 
-  
   deserialize(langOptions.ModuleName);
   deserialize(langOptions.CurrentModule);
   deserialize(langOptions.ModuleFeatures);
   deserialize(langOptions.NoBuiltinFuncs);
   deserialize(langOptions.OMPHostIRFile);
   deserializeAndChange(langOptions.IsHeaderFile);
-  
 }
 
 void deserialize(PreprocessorOptions &options) {
@@ -652,28 +652,23 @@ void deserialize(PreprocessorOptions &options) {
       (int)(options.ObjCXXARCStandardLibrary));
   deserializeAndChange(options.SetUpStaticAnalyzer);
   deserializeAndChange(options.DisablePragmaDebugCrash);
-  
 }
 
 void deserialize(HeaderSearchOptions &options) {
 
-  
   deserialize(options.Sysroot);
   deserialize(options.UserEntries);
   deserialize(options.SystemHeaderPrefixes);
   deserialize(options.ResourceDir);
 
-  
   deserialize(options.ModuleCachePath);
   deserialize(options.ModuleUserBuildPath);
   deserialize(options.PrebuiltModuleFiles);
 
-  
   deserialize(options.PrebuiltModulePaths);
   deserialize(options.ModuleFormat);
   options.DisableModuleHash = deserialize(options.DisableModuleHash);
 
-  
   options.ImplicitModuleMaps = deserialize(options.ImplicitModuleMaps);
   options.ModuleMapFileHomeIsCwd = deserialize(options.ModuleMapFileHomeIsCwd);
   options.ModuleCachePruneInterval =
@@ -682,14 +677,13 @@ void deserialize(HeaderSearchOptions &options) {
   options.BuildSessionTimestamp = deserialize(options.BuildSessionTimestamp);
   deserialize(options.VFSOverlayFiles);
   options.UseBuiltinIncludes = deserialize(options.UseBuiltinIncludes);
-  
+
   options.UseStandardSystemIncludes =
       deserialize(options.UseStandardSystemIncludes);
   options.UseStandardCXXIncludes = deserialize(options.UseStandardCXXIncludes);
   options.UseLibcxx = deserialize(options.UseLibcxx);
   options.Verbose = deserialize(options.Verbose);
 
-  
   options.ModulesValidateOncePerBuildSession =
       deserialize(options.ModulesValidateOncePerBuildSession);
   options.ModulesValidateSystemHeaders =
@@ -702,13 +696,33 @@ void deserialize(HeaderSearchOptions &options) {
   options.ModulesHashContent = deserialize(options.ModulesHashContent);
   options.ModulesStrictContextHash =
       deserialize(options.ModulesStrictContextHash);
-  
 }
 
-void deserialize(CompilerInstance &CI) {
-  deserialize(CI.getLangOpts());
-  deserialize(CI.getPreprocessorOpts());
-  deserialize(CI.getHeaderSearchOpts());
+auto deserialize() {
+  std::string fileName;
+  LangOptions lang;
+  PreprocessorOptions options;
+  HeaderSearchOptions headers;
+  deserialize(fileName);
+  deserialize(lang);
+  deserialize(options);
+  deserialize(headers);
+  return std::make_tuple(fileName, lang, options, headers);
+}
+
+void tryCompleteData(CompilerInstance &CI, std::string exe_path) {
+  while (g_index < g_deserailizeCompilerInvocation.size()) {
+    auto derialization = deserialize();
+    FileSpec exe_file(exe_path);
+    auto deserialization_file_path = std::get<0>(derialization);
+    if (exe_file.GetFilename() ==
+        FileSpec(deserialization_file_path).GetFilename()) {
+      CI.getLangOpts() = std::get<1>(derialization);
+      CI.getPreprocessorOpts() = std::get<2>(derialization);
+      CI.getHeaderSearchOpts() = std::get<3>(derialization);
+      break;
+    }
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -877,7 +891,7 @@ ClangExpressionParser::ClangExpressionParser(
 
   // 5. Set language options.
   lldb::LanguageType language = expr.Language();
-
+  
   CompilerInvocation inv;
   std::vector<std::string> m = {
       "-cc1",
@@ -948,8 +962,14 @@ ClangExpressionParser::ClangExpressionParser(
   assert(b);
   g_index = 0;
 
-  std::ifstream is(exe_scope->CalculateProcess()->getPath(),
-                   std::ifstream::binary);
+  std::string exe_path = exe_scope->CalculateProcess()->getPath();
+  if (exe_path.empty()) {
+    exe_path = exe_scope->CalculateTarget()
+                   ->GetExecutableModule()
+                   ->GetFileSpec()
+                   .GetPath();
+  }
+  std::ifstream is(exe_path, std::ifstream::binary);
   if (is) {
     // get length of file:
     is.seekg(0, is.end);
@@ -973,11 +993,18 @@ ClangExpressionParser::ClangExpressionParser(
               std::vector<char>(trueContents.begin(), trueContents.end());
           g_index = 0;
           g_deserailizeCompilerInvocation = serialized_command;
-          deserialize(*m_compiler);
+
+          auto context = exe_scope->CalculateStackFrame()->GetSymbolContext(
+              lldb::eSymbolContextCompUnit);
+          auto comp_unit = context.comp_unit;
+          auto comp_path = comp_unit->GetPrimaryFile().GetPath();
+          tryCompleteData(*m_compiler, comp_path);
+          break;
         }
       }
     }
   }
+  FileSpec s;
 
   LangOptions &lang_opts = m_compiler->getLangOpts();
 

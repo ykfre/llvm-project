@@ -23,9 +23,11 @@
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/Host.h"
-
+#include "llvm/Support/Path.h"
 #include <fstream>
 #include <iostream>
+#include <windows.h>
+#include <filesystem>
 using namespace clang;
 using namespace llvm::opt;
 
@@ -357,14 +359,38 @@ void serialize(const HeaderSearchOptions &options) {
   std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
-void serialize(CompilerInvocation &CI) {
-  auto LangOpt = CI.getLangOpts();
-  serialize(*LangOpt);
-  serialize(*CI.PreprocessorOpts);
-  serialize(CI.getHeaderSearchOpts());
+void serialize(CompilerInvocation &CI, SmallVector<FrontendInputFile, 0> inputs) {
+  for (const auto& input: inputs) {
 
-  std::ofstream f("commands", std::ios::binary | std::ios::ate);
+    llvm::SmallString<128> CurrDir;
+    llvm::sys::fs::current_path(CurrDir);
+    std::filesystem::path path(std::filesystem::path(CurrDir.str().str()));
+    std::filesystem::path full_path = path / input.getFile().str();
+    serialize(std::string(full_path.string()));
+    auto LangOpt = CI.getLangOpts();
+    serialize(*LangOpt);
+    serialize(*CI.PreprocessorOpts);
+    serialize(CI.getHeaderSearchOpts());
+  }
+
+  std::ofstream f("commands" + std::to_string(GetCurrentProcessId()), std::ios::binary | std::ios::ate);
   f.write(g_serailizeCompilerInvocation.data(), g_serailizeCompilerInvocation.size());
+}
+
+std::vector<char> read_serialize() {
+  std::ifstream is("commands" + std::to_string(GetCurrentProcessId()),
+                   std::ifstream::binary);
+  if (is) {
+    // get length of file:
+    is.seekg(0, is.end);
+    int length = is.tellg();
+    is.seekg(0, is.beg);
+    std::vector<char> compilerInvocationSerialized(length);
+    is.read(compilerInvocationSerialized.data(),
+            compilerInvocationSerialized.size());
+    return compilerInvocationSerialized;
+  }
+  return std::vector<char>();
 }
 
 std::unique_ptr<CompilerInvocation> clang::createInvocationFromCommandLine(

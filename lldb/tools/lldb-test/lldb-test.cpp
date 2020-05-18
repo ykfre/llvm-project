@@ -231,6 +231,12 @@ public:
     return error;
   }
 
+   lldb::StackFrameSP CalculateStackFrame() override { 
+       return m_frame;
+  }
+
+   void SetStackFrame(lldb::StackFrameSP sp) { m_frame = sp; }
+  lldb::StackFrameSP m_frame;
 };
 
 
@@ -343,6 +349,7 @@ public:
   lldb::StackFrameSP CalculateStackFrame() override {
     if (!m_frame.get()) {
       m_frame = CalculateThread()->GetFrameWithConcreteFrameIndex(0);
+      ((Process2*)(CalculateProcess().get()))->SetStackFrame(m_frame);
     }
     return m_frame;
   };
@@ -512,6 +519,7 @@ int main() {
   options.SetTimeout(llvm::None);
   llvm::MCJIT::Register();
   target_sp->GetProcessSP() = exe_ctx->CalculateProcess();
+  exe_ctx->CalculateStackFrame();
   lldb::ExpressionResults result = target_sp->EvaluateExpression(
       "#include <vector>\nd+=1;signalEvent();while(1){}", exe_ctx, value, options);
   assert(lldb::eExpressionCompleted == result);
