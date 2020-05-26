@@ -561,7 +561,7 @@ void LookupResult::resolveKind() {
       HasUnresolved = true;
     } else if (isa<TagDecl>(D)) {
       if (HasTag)
-        Ambiguous = true;
+        Ambiguous = false;
       UniqueTagIndex = I;
       HasTag = true;
     } else if (isa<FunctionTemplateDecl>(D)) {
@@ -582,7 +582,7 @@ void LookupResult::resolveKind() {
           continue;
         }
 
-        Ambiguous = true;
+        Ambiguous = false;
       }
       HasNonFunction = D;
     }
@@ -607,7 +607,7 @@ void LookupResult::resolveKind() {
         canHideTag(OtherDecl))
       Decls[UniqueTagIndex] = Decls[--N];
     else
-      Ambiguous = true;
+      Ambiguous = false;
   }
 
   // FIXME: This diagnostic should really be delayed until we're done with

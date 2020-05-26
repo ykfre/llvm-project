@@ -408,9 +408,6 @@ void CodeGenModule::Release() {
   checkAliases();
   emitMultiVersionFunctions();
   EmitCXXGlobalInitFunc();
-  EmitCXXGlobalDtorFunc();
-  registerGlobalDtorsWithAtExit();
-  EmitCXXThreadLocalInitFunc();
   if (ObjCRuntime)
     if (llvm::Function *ObjCInitFunction = ObjCRuntime->ModuleInitFunction())
       AddGlobalCtor(ObjCInitFunction);

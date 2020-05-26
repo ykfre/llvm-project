@@ -891,75 +891,7 @@ ClangExpressionParser::ClangExpressionParser(
 
   // 5. Set language options.
   lldb::LanguageType language = expr.Language();
-  
-  CompilerInvocation inv;
-  std::vector<std::string> m = {
-      "-cc1",
-      "-triple",
-      "x86_64-pc-windows-msvc19.25.28614",
-      "-fmath-errno",
-      "-fno-rounding-math",
-      "-masm-verbose",
-      "-mconstructor-aliases",
-      "-munwind-tables",
-      "-target-cpu",
-      "x86-64",
-      "-gcodeview",
-      "-debug-info-kind=limited",
-      "-v",
-      "-resource-dir",
-      "C:\\Program Files\\LLVM\\lib\\clang\\10.0.0",
-      "-internal-isystem",
-      "C:\\Program Files\\LLVM\\lib\\clang\\10.0.0\\include",
-      "-internal-isystem",
-      "C:\\Program Files (x86)\\Microsoft Visual "
-      "Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\include",
-      "-internal-isystem",
-      "C:\\Program Files (x86)\\Microsoft Visual "
-      "Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\atlmfc\\include",
-      "-internal-isystem",
-      "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.18362.0\\ucrt",
-      "-internal-isystem",
-      "C:\\Program Files (x86)\\Windows "
-      "Kits\\10\\include\\10.0.18362.0\\shared",
-      "-internal-isystem",
-      "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.18362.0\\um",
-      "-internal-isystem",
-      "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.18362.0\\winrt",
-      "-internal-isystem",
-      "C:\\Users\\idowe\\source\\repos\\Project1\\Project1",
-      "-fdeprecated-macro",
-      "-fdebug-compilation-dir",
-      "C:\\Users\\idowe\\Desktop\\temp",
-      "-ferror-limit",
-      "19",
-      "-fmessage-length",
-      "120",
-      "-fno-use-cxa-atexit",
-      "-fms-extensions",
-      "-fms-compatibility",
-      "-fms-compatibility-version=19.25.28614",
-      "-std=c++14",
-      "-fdelayed-template-parsing",
-      "-fobjc-runtime=gcc",
-      "-fcxx-exceptions",
-      "-fexceptions",
-      "-fdiagnostics-show-option",
-      "-fcolor-diagnostics",
-      "-faddrsig",
-      "-Dme=9",
-      "-x",
-      "c++"};
-  std::vector<const char *> v;
 
-  for (const auto &arg : m) {
-    v.push_back(arg.c_str());
-  }
-
-  auto diag = CompilerInstance::createDiagnostics(new DiagnosticOptions);
-  bool b =
-      CompilerInvocation::CreateFromArgs(inv, ArrayRef<const char *>(v), *diag);
-  assert(b);
   g_index = 0;
 
   std::string exe_path = exe_scope->CalculateProcess()->getPath();
@@ -983,9 +915,9 @@ ClangExpressionParser::ClangExpressionParser(
                             (uint8_t *)exe_data.data(), exe_data.size())),
                         "");
     object::COFFObjectFile coff(memoryBuffer, ec);
-
     for (const auto &section : coff.sections()) {
-      if (section.getName() && section.getName().get() == ".llvm_co") {
+      auto name = section.getName().get();
+      if (section.getName() && (section.getName().get() == ".llvm_co" || section.getName().get() == ".llvm_command")) {
         auto contents = section.getContents();
         if (contents) {
           auto trueContents = contents.get();
@@ -994,9 +926,15 @@ ClangExpressionParser::ClangExpressionParser(
           g_index = 0;
           g_deserailizeCompilerInvocation = serialized_command;
 
-          auto context = exe_scope->CalculateStackFrame()->GetSymbolContext(
+          auto context = exe_scope->CalculateProcess()
+                             ->GetThreadList()
+                             .GetSelectedThread()
+                             ->GetSelectedFrame()->GetSymbolContext(
               lldb::eSymbolContextCompUnit);
           auto comp_unit = context.comp_unit;
+          if (nullptr == comp_unit) {
+            break;
+          }
           auto comp_path = comp_unit->GetPrimaryFile().GetPath();
           tryCompleteData(*m_compiler, comp_path);
           break;
@@ -1019,6 +957,7 @@ ClangExpressionParser::ClangExpressionParser(
   // Set CodeGen options
   m_compiler->getCodeGenOpts().EmitDeclMetadata = true;
   m_compiler->getCodeGenOpts().InstrumentFunctions = false;
+  m_compiler->getCodeGenOpts().RegisterGlobalDtorsWithAtExit = false;
   m_compiler->getCodeGenOpts().setFramePointer(
       CodeGenOptions::FramePointerKind::All);
   if (generate_debug_info)
@@ -1344,6 +1283,16 @@ unsigned ClangExpressionParser::Parse(DiagnosticManager &diagnostic_manager) {
   return ParseInternal(diagnostic_manager);
 }
 
+std::vector<std::string> splitToLines(const std::string &str) {
+  std::stringstream ss(str);
+  std::string to;
+  std::vector<std::string> res;
+  while (std::getline(ss, to, '\n')) {
+    res.push_back(to);
+  }
+  return res;
+}
+
 unsigned
 ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                      CodeCompleteConsumer *completion_consumer,
@@ -1359,13 +1308,18 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   const char *expr_text = m_expr.Text();
 
   std::string text = expr_text;
-  std::string stringToSearch = "#include <vector>";
-  int a = text.find(stringToSearch);
-  if (std::string::npos != a) {
-    text.replace(a, stringToSearch.size(), "");
-    text = stringToSearch + "\n" + text;
+  auto lines = splitToLines(text);
+  std::string headers;
+  std::string newText;
+  for (const auto& line: lines) {
+    if (line.find("#include") != -1) {
+      headers += line + "\n";
+    } else {
+      newText += line + "\n";
+    }
   }
-  expr_text = text.c_str();
+  newText = headers + newText;
+  expr_text = newText.c_str();
 
   clang::SourceManager &source_mgr = m_compiler->getSourceManager();
   bool created_main_file = false;

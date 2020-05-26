@@ -1319,7 +1319,8 @@ bool IRForTarget::MaybeHandleCallArguments(CallInst *Old) {
     // conservatively believe that this is a store
     if (!MaybeHandleVariable(Old->getArgOperand(op_index))) {
       m_error_stream.Printf("Internal error [IRForTarget]: Couldn't rewrite "
-                            "one of the arguments of a function call.\n");
+                            "one of the arguments of a function call %s.\n",
+                            PrintValue(Old).c_str());
 
       return false;
     }

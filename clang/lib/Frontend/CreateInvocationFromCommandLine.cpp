@@ -324,8 +324,13 @@ void serialize(PreprocessorOptions &options) {
   std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
-void serialize(const HeaderSearchOptions &options) {
+void serialize(HeaderSearchOptions &options) {
   serialize(options.Sysroot);
+  char workingDir[400] = {0};
+  GetCurrentDirectoryA(400, workingDir);
+  auto newEntry = options.UserEntries.at(0);
+  newEntry.Path = workingDir;
+  options.UserEntries.push_back(newEntry);
   serialize(options.UserEntries);
   serialize(options.SystemHeaderPrefixes);
   serialize(options.ResourceDir);

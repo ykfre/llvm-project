@@ -447,8 +447,6 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     } else
       type_resolve_state = Type::ResolveState::Forward;
 
-    if (udt->isConstType())
-      clang_type = clang_type.AddConstModifier();
 
     if (udt->isVolatileType())
       clang_type = clang_type.AddVolatileModifier();
@@ -1199,7 +1197,6 @@ bool PDBASTParser::CompleteTypeFromUDT(
     return static_cast<bool>(compiler_type);
 
   GetClangASTImporter().SetRecordLayout(record_decl, layout_info);
-
   return static_cast<bool>(compiler_type);
 }
 
