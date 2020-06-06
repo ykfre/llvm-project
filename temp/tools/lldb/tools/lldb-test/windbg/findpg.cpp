@@ -496,9 +496,9 @@ void EXT_CLASS::deallocateMemory(void *address) {
   std::stringstream command;
   command << ".dvfree 0x" << std::hex << (size_t)address  << " 0";
   Out(command.str().c_str());
-  //auto result =
-    //  m_Control->Execute(DEBUG_OUTCTL_ALL_CLIENTS, command.str().c_str(), 0);
-  //THROW_IF_FALSE(SUCCEEDED(result), "deallocate failed");
+  auto result =
+      m_Control->Execute(DEBUG_OUTCTL_ALL_CLIENTS, command.str().c_str(), 0);
+  THROW_IF_FALSE(SUCCEEDED(result), "deallocate failed");
 }
 
 int EXT_CLASS::getThreadId() { return getRegisterValue("$tid").to_ulong(); }

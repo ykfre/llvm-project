@@ -1036,8 +1036,6 @@ Decl *TemplateDeclInstantiator::VisitFieldDecl(FieldDecl *D) {
     SemaRef.Context.setInstantiatedFromUnnamedFieldDecl(Field, D);
   }
   if (CXXRecordDecl *Parent= dyn_cast<CXXRecordDecl>(Field->getDeclContext())) {
-    if (Parent->isAnonymousStructOrUnion() &&
-        Parent->getRedeclContext()->isFunctionOrMethod())
       SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, Field);
   }
 

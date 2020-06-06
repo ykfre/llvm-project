@@ -1777,14 +1777,18 @@ void CodeGenFunction::EnterDtorCleanups(const CXXDestructorDecl *DD,
     assert(DD->getOperatorDelete() &&
            "operator delete missing - EnterDtorCleanups");
     if (CXXStructorImplicitParamValue) {
-      // If there is an implicit param to the deleting dtor, it's a boolean
-      // telling whether this is a deleting destructor.
-      if (DD->getOperatorDelete()->isDestroyingOperatorDelete())
-        EmitConditionalDtorDeleteCall(*this, CXXStructorImplicitParamValue,
-                                      /*ReturnAfterDelete*/true);
-      else
-        EHStack.pushCleanup<CallDtorDeleteConditional>(
-            NormalAndEHCleanup, CXXStructorImplicitParamValue);
+        if (nullptr != DD->getCanonicalDecl()->getOperatorDeleteThisArg())
+        {
+        // If there is an implicit param to the deleting dtor, it's a boolean
+        // telling whether this is a deleting destructor.
+        if (DD->getOperatorDelete()->isDestroyingOperatorDelete())
+          EmitConditionalDtorDeleteCall(*this, CXXStructorImplicitParamValue,
+                                        /*ReturnAfterDelete*/ true);
+        else
+          EHStack.pushCleanup<CallDtorDeleteConditional>(
+              NormalAndEHCleanup, CXXStructorImplicitParamValue);
+      }
+      
     } else {
       if (DD->getOperatorDelete()->isDestroyingOperatorDelete()) {
         const CXXRecordDecl *ClassDecl = DD->getParent();

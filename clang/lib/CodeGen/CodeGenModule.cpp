@@ -2337,6 +2337,17 @@ bool CodeGenModule::MustBeEmitted(const ValueDecl *Global) {
   if (LangOpts.EmitAllDecls)
     return true;
 
+  if (isa<CXXMethodDecl>(Global))
+  {
+    auto func = (CXXMethodDecl*)Global;
+    if (func->isTemplateInstantiation()&& func->getParent() &&
+        isa <ClassTemplateSpecializationDecl>(func->getParent()))
+    {
+        
+        return true;
+    }
+  }
+
   if (CodeGenOpts.KeepStaticConsts) {
     const auto *VD = dyn_cast<VarDecl>(Global);
     if (VD && VD->getType().isConstQualified() &&
@@ -3106,6 +3117,7 @@ llvm::Constant *CodeGenModule::GetOrCreateLLVMFunction(
     StringRef MangledName, llvm::Type *Ty, GlobalDecl GD, bool ForVTable,
     bool DontDefer, bool IsThunk, llvm::AttributeList ExtraAttrs,
     ForDefinition_t IsForDefinition) {
+
   const Decl *D = GD.getDecl();
 
   // Any attempts to use a MultiVersion function should result in retrieving
@@ -4451,6 +4463,7 @@ void CodeGenModule::EmitGlobalFunctionDefinition(GlobalDecl GD,
   // want to propagate this information down (e.g. to local static
   // declarations).
   auto *Fn = cast<llvm::Function>(GV);
+  auto r = Fn->getName();
   setFunctionLinkage(GD, Fn);
 
   // FIXME: this is redundant with part of setFunctionDefinitionAttributes

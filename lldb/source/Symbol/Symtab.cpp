@@ -637,6 +637,18 @@ Symtab::AppendSymbolIndexesWithNameAndType(ConstString symbol_name,
                                            std::vector<uint32_t> &indexes) {
   std::lock_guard<std::recursive_mutex> guard(m_mutex);
 
+  symbol_name = ConstString(std::regex_replace(
+      symbol_name.GetStringRef().str(), std::regex(" const"), ""));
+  symbol_name = ConstString(std::regex_replace(symbol_name.GetStringRef().str(),
+                                               std::regex("const"), ""));
+
+  symbol_name = ConstString(std::regex_replace(symbol_name.GetStringRef().str(),
+                                               std::regex("struct"), ""));
+  symbol_name = ConstString(std::regex_replace(symbol_name.GetStringRef().str(),
+                                               std::regex("class"), ""));
+
+  symbol_name = ConstString(std::regex_replace(symbol_name.GetStringRef().str(),
+                                               std::regex(" "), ""));
   if (AppendSymbolIndexesWithName(symbol_name, indexes) > 0) {
     std::vector<uint32_t>::iterator pos = indexes.begin();
     while (pos != indexes.end()) {
