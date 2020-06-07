@@ -15788,21 +15788,7 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
             // Notify the consumer that a function was implicitly instantiated.
             Consumer.HandleCXXImplicitFunctionInstantiation(Func);
             
-            if (dyn_cast<CXXMethodDecl>(Func)) {
-              auto method = dyn_cast<CXXMethodDecl>(Func);
-              auto parent = method->getParent();
-              auto methods = parent->methods();
-              for (const auto &method : methods) {
-                if (method->getNumTemplateParameterLists() == 0) {
-                  if (method->instantiationIsPending()) {
-                    continue;
-                  }
-
-                  MarkFunctionReferenced(method->getSourceRange().getBegin(),
-                                         method, MightBeOdrUse);
-                }
-              }
-            }
+            
           }
         }
       } else {

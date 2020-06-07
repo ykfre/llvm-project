@@ -451,6 +451,8 @@ static bool isPreferredLookupResult(Sema &S, Sema::LookupNameKind Kind,
   return false;
 }
 
+extern bool g_is_lldb_execution;
+
 /// Determine whether \p D can hide a tag declaration.
 static bool canHideTag(NamedDecl *D) {
   // C++ [basic.scope.declarative]p4:
@@ -560,8 +562,13 @@ void LookupResult::resolveKind() {
     if (isa<UnresolvedUsingValueDecl>(D)) {
       HasUnresolved = true;
     } else if (isa<TagDecl>(D)) {
-      if (HasTag)
-        Ambiguous = false;
+      if (HasTag) {
+        if (g_is_lldb_execution) {
+          Ambiguous = false;
+        } else {
+          Ambiguous = true;
+        }
+      }
       UniqueTagIndex = I;
       HasTag = true;
     } else if (isa<FunctionTemplateDecl>(D)) {
@@ -581,8 +588,11 @@ void LookupResult::resolveKind() {
           Decls[I] = Decls[--N];
           continue;
         }
-
-        Ambiguous = false;
+        if (g_is_lldb_execution) {
+          Ambiguous = false;
+        } else {
+          Ambiguous = true;
+        }
       }
       HasNonFunction = D;
     }
@@ -606,8 +616,13 @@ void LookupResult::resolveKind() {
             getContextForScopeMatching(OtherDecl)) &&
         canHideTag(OtherDecl))
       Decls[UniqueTagIndex] = Decls[--N];
-    else
-      Ambiguous = false;
+    else {
+      if (g_is_lldb_execution) {
+        Ambiguous = false;
+      } else {
+        Ambiguous = true;
+      }
+    }
   }
 
   // FIXME: This diagnostic should really be delayed until we're done with

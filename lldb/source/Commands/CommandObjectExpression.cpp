@@ -20,7 +20,8 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
-
+#include "llvm/Support/FileSystem.h"
+#include <fstream>
 using namespace lldb;
 using namespace lldb_private;
 
@@ -408,9 +409,22 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
   else
     options.SetTimeout(llvm::None);
 
+  std::ifstream is(expr,
+                   std::ifstream::binary);
+  std::string temp;
+  if (is) {
+    // get length of file:
+    is.seekg(0, is.end);
+    int length = is.tellg();
+    is.seekg(0, is.beg);
+    std::vector<char> real_expr(length);
+    is.read(real_expr.data(), real_expr.size());
+    temp = std::string(real_expr.begin(), real_expr.end());
+    expr = llvm::StringRef(temp);
+  }
+  
   ExpressionResults success = target->EvaluateExpression(
       expr, frame, result_valobj_sp, options, &m_fixed_expression);
-
   // We only tell you about the FixIt if we applied it.  The compiler errors
   // will suggest the FixIt if it parsed.
   if (error_stream && !m_fixed_expression.empty() &&

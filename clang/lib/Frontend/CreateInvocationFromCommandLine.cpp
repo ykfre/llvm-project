@@ -31,6 +31,8 @@
 using namespace clang;
 using namespace llvm::opt;
 
+bool g_is_lldb_execution = true;
+
 std::vector<char> g_serailizeCompilerInvocation;
 
 void serialize(void *obj, size_t sizeofObj) {

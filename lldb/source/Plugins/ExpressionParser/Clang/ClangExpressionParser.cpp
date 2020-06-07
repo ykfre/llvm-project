@@ -710,13 +710,20 @@ auto deserialize() {
   return std::make_tuple(fileName, lang, options, headers);
 }
 
-void tryCompleteData(CompilerInstance &CI, std::string exe_path) {
+void tryCompleteData(CompilerInstance &CI, std::string wanted_obj_path) {
   while (g_index < g_deserailizeCompilerInvocation.size()) {
     auto derialization = deserialize();
-    FileSpec exe_file(exe_path);
-    auto deserialization_file_path = std::get<0>(derialization);
-    if (exe_file.GetFilename() ==
-        FileSpec(deserialization_file_path).GetFilename()) {
+    auto current_obj_path = std::get<0>(derialization);
+    std::replace(wanted_obj_path.begin(), wanted_obj_path.end(), '/',
+                 '\\');
+    std::replace(current_obj_path.begin(), current_obj_path.end(), '/', '\\');
+    std::transform(current_obj_path.begin(), current_obj_path.end(),
+                   current_obj_path.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    std::transform(wanted_obj_path.begin(), wanted_obj_path.end(),
+                   wanted_obj_path.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (wanted_obj_path == current_obj_path) {
       CI.getLangOpts() = std::get<1>(derialization);
       CI.getPreprocessorOpts() = std::get<2>(derialization);
       CI.getHeaderSearchOpts() = std::get<3>(derialization);
@@ -947,6 +954,7 @@ ClangExpressionParser::ClangExpressionParser(
   LangOptions &lang_opts = m_compiler->getLangOpts();
 
   lang_opts.ThreadsafeStatics = false;
+  lang_opts.EmitAllDecls = false;
   lang_opts.AccessControl = false; // Debuggers get universal access
   lang_opts.DollarIdents = true;   // $ indicates a persistent variable name
   // We enable all builtin functions beside the builtins from libc/libm (e.g.
@@ -956,6 +964,9 @@ ClangExpressionParser::ClangExpressionParser(
 
   // Set CodeGen options
   m_compiler->getCodeGenOpts().EmitDeclMetadata = true;
+  m_compiler->getCodeGenOpts().ControlFlowGuardNoChecks = true;
+  m_compiler->getLangOpts().setStackProtector(LangOptions::SSPOn);
+
   m_compiler->getCodeGenOpts().InstrumentFunctions = false;
   m_compiler->getCodeGenOpts().RegisterGlobalDtorsWithAtExit = false;
   m_compiler->getCodeGenOpts().setFramePointer(

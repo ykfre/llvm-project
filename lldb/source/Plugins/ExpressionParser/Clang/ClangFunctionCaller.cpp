@@ -60,9 +60,9 @@ ClangFunctionCaller::ClangFunctionCaller(ExecutionContextScope &exe_scope,
 
 // Destructor
 ClangFunctionCaller::~ClangFunctionCaller() {}
+extern bool g_is_lldb_execution;
 
 unsigned
-
 ClangFunctionCaller::CompileFunction(lldb::ThreadSP thread_to_use_sp,
                                      DiagnosticManager &diagnostic_manager) {
   if (m_compiled)
@@ -188,6 +188,7 @@ ClangFunctionCaller::CompileFunction(lldb::ThreadSP thread_to_use_sp,
   lldb::ProcessSP jit_process_sp(m_jit_process_wp.lock());
   if (jit_process_sp) {
     const bool generate_debug_info = true;
+    g_is_lldb_execution = true;
     auto *clang_parser = new ClangExpressionParser(jit_process_sp.get(), *this,
                                                    generate_debug_info);
     num_errors = clang_parser->Parse(diagnostic_manager);

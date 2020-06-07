@@ -400,6 +400,8 @@ void InstrProfStats::reportDiagnostics(DiagnosticsEngine &Diags,
   }
 }
 
+extern bool g_is_lldb_execution;
+
 void CodeGenModule::Release() {
   EmitDeferred();
   EmitVTablesOpportunistically();
@@ -407,7 +409,13 @@ void CodeGenModule::Release() {
   applyReplacements();
   checkAliases();
   emitMultiVersionFunctions();
-  EmitCXXGlobalInitFunc();
+  if (g_is_lldb_execution)
+  {
+    EmitCXXGlobalInitFunc();
+    EmitCXXGlobalDtorFunc();
+    registerGlobalDtorsWithAtExit();
+    EmitCXXThreadLocalInitFunc();
+  }
   if (ObjCRuntime)
     if (llvm::Function *ObjCInitFunction = ObjCRuntime->ModuleInitFunction())
       AddGlobalCtor(ObjCInitFunction);
@@ -2336,17 +2344,6 @@ bool CodeGenModule::MustBeEmitted(const ValueDecl *Global) {
   // Never defer when EmitAllDecls is specified.
   if (LangOpts.EmitAllDecls)
     return true;
-
-  if (isa<CXXMethodDecl>(Global))
-  {
-    auto func = (CXXMethodDecl*)Global;
-    if (func->isTemplateInstantiation()&& func->getParent() &&
-        isa <ClassTemplateSpecializationDecl>(func->getParent()))
-    {
-        
-        return true;
-    }
-  }
 
   if (CodeGenOpts.KeepStaticConsts) {
     const auto *VD = dyn_cast<VarDecl>(Global);

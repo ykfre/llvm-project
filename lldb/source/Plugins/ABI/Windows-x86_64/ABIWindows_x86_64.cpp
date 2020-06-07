@@ -1148,7 +1148,6 @@ bool ABIWindows_x86_64::PrepareTrivialCall(Thread &thread, addr_t sp,
   Status error;
   const RegisterInfo *pc_reg_info =
       reg_ctx->GetRegisterInfo(eRegisterKindGeneric, LLDB_REGNUM_GENERIC_PC);
-  reg_ctx->GetPC();
   const RegisterInfo *sp_reg_info =
       reg_ctx->GetRegisterInfo(eRegisterKindGeneric, LLDB_REGNUM_GENERIC_SP);
   ProcessSP process_sp(thread.GetProcess());
