@@ -446,7 +446,7 @@ bool run(RunArgs runArgs) {
   llvm::InitializeAllAsmPrinters();
   llvm::InitializeAllTargetMCs();
   llvm::InitializeAllDisassemblers();
-  SymbolFilePDB::Initialize();
+  SymbolFileDWARF::Initialize();
   UnwindAssemblyInstEmulation::Initialize();
   UnwindAssembly_x86::Initialize();
   lldb_private::ClangASTContext::Initialize();
@@ -509,12 +509,12 @@ bool run(RunArgs runArgs) {
   auto exe_ctx = MyCtx(target_sp, runArgs);
   exe_ctx.CalculateThread()->SetSelectedFrameByIndex(runArgs.frameIndex);
   lldb_private::EvaluateExpressionOptions options;
-  options.SetUnwindOnError(false);
+  options.SetUnwindOnError(true);
   options.SetIgnoreBreakpoints(true);
   options.SetKeepInMemory(true);
   options.SetUseDynamic(lldb::eDynamicDontRunTarget);
   options.SetTryAllThreads(true);
-  options.SetDebug(false);
+  options.SetDebug(true);
   options.SetCoerceToId(false);
   options.SetExecutionPolicy(lldb_private::eExecutionPolicyAlways);
   options.SetGenerateDebugInfo(true);

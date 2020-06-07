@@ -209,7 +209,6 @@ int cc1_main(ArrayRef<const char *> Argv, const char *Argv0, void *MainAddr) {
   bool Success =
       CompilerInvocation::CreateFromArgs(Clang->getInvocation(), Argv, Diags);
 
-  std::cout << "serializing " << std::endl;
   serialize(Clang->getInvocation(), Clang->getFrontendOpts().Inputs);
 
   if (Clang->getFrontendOpts().TimeTrace) {

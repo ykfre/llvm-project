@@ -294,7 +294,6 @@ void serialize(LangOptions &langOptions) {
   serialize(langOptions.NoBuiltinFuncs);
   serialize(langOptions.OMPHostIRFile);
   serialize(langOptions.IsHeaderFile);
-  std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
 void serialize(PreprocessorOptions &options) {
@@ -321,7 +320,6 @@ void serialize(PreprocessorOptions &options) {
   serialize((unsigned int)options.ObjCXXARCStandardLibrary);
   serialize(options.SetUpStaticAnalyzer);
   serialize(options.DisablePragmaDebugCrash);
-  std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
 void serialize(HeaderSearchOptions &options) {
@@ -361,7 +359,6 @@ void serialize(HeaderSearchOptions &options) {
   serialize(options.ModulesValidateDiagnosticOptions);
   serialize(options.ModulesHashContent);
   serialize(options.ModulesStrictContextHash);
-  std::cout << g_serailizeCompilerInvocation.size() << std::endl;
 }
 
 void serialize(CompilerInvocation &CI, SmallVector<FrontendInputFile, 0> inputs) {
