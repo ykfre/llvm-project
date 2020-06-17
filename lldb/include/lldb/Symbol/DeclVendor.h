@@ -10,7 +10,7 @@
 #define liblldb_DeclVendor_h_
 
 #include "lldb/lldb-defines.h"
-
+#include "clang/AST/DeclBase.h"
 #include <vector>
 
 namespace lldb_private {
@@ -48,7 +48,8 @@ public:
   /// \return
   ///     The number of Decls added to decls; will not exceed
   ///     max_matches.
-  virtual uint32_t FindDecls(ConstString name, bool append,
+  virtual uint32_t FindDecls(clang::DeclContext* context,    ConstString name,
+                             bool append,
                              uint32_t max_matches,
                              std::vector<CompilerDecl> &decls) = 0;
 

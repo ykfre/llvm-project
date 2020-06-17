@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <set>
+#include <iostream>
 #include "clang/AST/ASTImporter.h"
 #include "clang/AST/ASTImporterSharedState.h"
 #include "clang/AST/ASTContext.h"
@@ -141,6 +143,7 @@ namespace clang {
                           public DeclVisitor<ASTNodeImporter, ExpectedDecl>,
                           public StmtVisitor<ASTNodeImporter, ExpectedStmt> {
     ASTImporter &Importer;
+    std::set<Decl *> AlreadyVisitedDecls;
 
     // Use this instead of Importer.importInto .
     template <typename ImportT>
@@ -5109,7 +5112,6 @@ ASTNodeImporter::VisitTemplateTypeParmDecl(TemplateTypeParmDecl *D) {
   // context. This context will be fixed when the actual template declaration
   // is created.
 
-  // FIXME: Import default argument  and constraint expression.
 
   ExpectedSLoc BeginLocOrErr = import(D->getBeginLoc());
   if (!BeginLocOrErr)
@@ -5160,7 +5162,13 @@ ASTNodeImporter::VisitTemplateTypeParmDecl(TemplateTypeParmDecl *D) {
                                                 ToTAInfo) : nullptr,
         ToIDC);
   }
-
+  if (D->hasDefaultArgument()) {
+    auto defaultType = Importer.Import(D->getDefaultArgumentInfo());
+    if (defaultType)
+    {
+      ToD->setDefaultArgument(defaultType.get());
+    }
+  }
   return ToD;
 }
 
@@ -5179,8 +5187,6 @@ ASTNodeImporter::VisitNonTypeTemplateParmDecl(NonTypeTemplateParmDecl *D) {
   else
     return Imp.takeError();
 
-  // FIXME: Import default argument.
-
   NonTypeTemplateParmDecl *ToD = nullptr;
   (void)GetImportedOrCreateDecl(
       ToD, D, Importer.getToContext(),
@@ -5188,6 +5194,13 @@ ASTNodeImporter::VisitNonTypeTemplateParmDecl(NonTypeTemplateParmDecl *D) {
       ToInnerLocStart, ToLocation, D->getDepth(),
       D->getPosition(), ToDeclName.getAsIdentifierInfo(), ToType,
       D->isParameterPack(), ToTypeSourceInfo);
+  if (D->hasDefaultArgument()) {
+    auto importedDefaultArg = Visit(D->getDefaultArgument());
+    if (importedDefaultArg)
+    {
+      ToD->setDefaultArgument(reinterpret_cast<Expr*>(importedDefaultArg.get()));
+    }
+  }
   return ToD;
 }
 
@@ -5232,7 +5245,12 @@ template <typename T> static auto getTemplateDefinition(T *D) -> T * {
 }
 
 ExpectedDecl ASTNodeImporter::VisitClassTemplateDecl(ClassTemplateDecl *D) {
-
+  if (D->getNameAsString().find("expected_move_assign_base") != -1)
+    {
+    auto source = D->getLocation().printToString(
+        D->getASTContext().getSourceManager());
+      source = source;
+  }
   // Import the major distinguishing characteristics of this class template.
   DeclContext *DC, *LexicalDC;
   DeclarationName Name;
@@ -5344,6 +5362,13 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateDecl(ClassTemplateDecl *D) {
 
 ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
                                           ClassTemplateSpecializationDecl *D) {
+auto templatedClass = dyn_cast<ClassTemplateDecl>(D);
+
+  if (D->getNameAsString().find("expected_move_assign_base") != -1) {
+    auto source =
+        D->getLocation().printToString(D->getASTContext().getSourceManager());
+    source = source;
+  }
   ClassTemplateDecl *ClassTemplate;
   if (Error Err = importInto(ClassTemplate, D->getSpecializedTemplate()))
     return std::move(Err);
@@ -8534,11 +8559,33 @@ ASTImporter::Import(NestedNameSpecifierLoc FromNNS) {
 
 Expected<TemplateName> ASTImporter::Import(TemplateName From) {
   switch (From.getKind()) {
-  case TemplateName::Template:
+  case TemplateName::Template: {
+
+    auto templated = dyn_cast<ClassTemplateDecl>(From.getAsTemplateDecl());
+    if (templated) {
+      for (const auto &specialization : templated->specializations()) {
+          if (AlreadyVisitedDecls.find(specialization) ==
+              AlreadyVisitedDecls.end())
+          {
+          AlreadyVisitedDecls.insert(specialization);
+          Import(QualType(specialization->getTypeForDecl(), 0));
+        }
+      }
+      SmallVector<ClassTemplatePartialSpecializationDecl *,4> PS;
+      templated->getPartialSpecializations(PS);
+      for (const auto &specialization : PS) {
+        if (AlreadyVisitedDecls.find(specialization) ==
+            AlreadyVisitedDecls.end()) {
+          AlreadyVisitedDecls.insert(specialization);
+          Import(QualType(specialization->getTypeForDecl(), 0));
+        }
+      }
+    }
     if (ExpectedDecl ToTemplateOrErr = Import(From.getAsTemplateDecl()))
       return TemplateName(cast<TemplateDecl>(*ToTemplateOrErr));
     else
       return ToTemplateOrErr.takeError();
+  }
 
   case TemplateName::OverloadedTemplate: {
     OverloadedTemplateStorage *FromStorage = From.getAsOverloadedTemplate();

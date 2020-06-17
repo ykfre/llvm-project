@@ -10,7 +10,7 @@
 #define liblldb_ClangASTSource_h_
 
 #include <set>
-
+#include <vector>
 #include "lldb/Symbol/ClangASTImporter.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/Target.h"
@@ -220,6 +220,11 @@ public:
       return m_original.FindExternalVisibleDeclsByName(DC, Name);
     }
 
+    bool findByModules(clang::DeclContext *context, ConstString name,
+                       std::vector<clang::NamedDecl *> &decls) {
+      return m_original.findByModules(context, name, decls);
+    }
+
     void FindExternalLexicalDecls(
         const clang::DeclContext *DC,
         llvm::function_ref<bool(clang::Decl::Kind)> IsKindWeWant,
@@ -290,6 +295,9 @@ protected:
                                 lldb::ModuleSP module,
                                 CompilerDeclContext &namespace_decl,
                                 unsigned int current_id);
+
+  bool findByModules(clang::DeclContext *context, ConstString name,
+                     std::vector<clang::NamedDecl *> &decls);
 
   /// Find all Objective-C methods matching a given selector.
   ///

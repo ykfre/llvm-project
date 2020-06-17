@@ -14,7 +14,7 @@
 #include "lldb/Target/Platform.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangDeclVendor.h"
-
+#include "ClangASTSource.h"
 #include <set>
 #include <vector>
 

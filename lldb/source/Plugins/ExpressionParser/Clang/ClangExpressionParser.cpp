@@ -14,7 +14,6 @@
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/TargetInfo.h"
-
 #include "clang/Basic/Version.h"
 #include "clang/CodeGen/CodeGenAction.h"
 #include "clang/CodeGen/ModuleBuilder.h"
@@ -22,11 +21,6 @@
 #include "clang/Edit/EditedSource.h"
 #include "clang/Edit/EditsReceiver.h"
 #include "clang/Frontend/CompilerInstance.h"
-
-#include <fstream>
-#include <iostream>
-#include <sstream>
-
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
@@ -98,9 +92,8 @@
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/StringList.h"
 #include "lldb/lldb-enumerations.h"
-
+#include <fstream>
 #include "lldb/Symbol/CompileUnit.h"
-
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 
 #include <cctype>
@@ -442,22 +435,18 @@ void deserialize(LangOptions &langOptions) {
   langOptions.EmitAllDecls = deserialize(langOptions.EmitAllDecls);
   langOptions.MathErrno = deserialize(langOptions.MathErrno);
   langOptions.HeinousExtensions = deserialize(langOptions.HeinousExtensions);
-  langOptions.Modules = deserialize(langOptions.Modules);
-  langOptions.ModulesTS = deserialize(langOptions.ModulesTS);
-  langOptions.CPlusPlusModules = deserialize(langOptions.CPlusPlusModules);
-  langOptions.CompilingPCH = deserialize(langOptions.CompilingPCH);
-  langOptions.BuildingPCHWithObjectFile =
-      deserialize(langOptions.BuildingPCHWithObjectFile);
-  langOptions.CacheGeneratedPCH = deserialize(langOptions.CacheGeneratedPCH);
-  langOptions.ModulesDeclUse = deserialize(langOptions.ModulesDeclUse);
-  langOptions.ModulesSearchAll = deserialize(langOptions.ModulesSearchAll);
-  langOptions.ModulesStrictDeclUse =
-      deserialize(langOptions.ModulesStrictDeclUse);
-  langOptions.ModulesErrorRecovery =
-      deserialize(langOptions.ModulesErrorRecovery);
-  langOptions.ImplicitModules = deserialize(langOptions.ImplicitModules);
-  langOptions.ModulesLocalVisibility =
-      deserialize(langOptions.ModulesLocalVisibility);
+  deserialize(langOptions.Modules);
+  deserialize(langOptions.ModulesTS);
+  deserialize(langOptions.CPlusPlusModules);
+  deserialize(langOptions.CompilingPCH);
+  deserialize(langOptions.BuildingPCHWithObjectFile);
+  deserialize(langOptions.CacheGeneratedPCH);
+  deserialize(langOptions.ModulesDeclUse);
+  deserialize(langOptions.ModulesSearchAll);
+  deserialize(langOptions.ModulesStrictDeclUse);
+  deserialize(langOptions.ModulesErrorRecovery);
+  deserialize(langOptions.ImplicitModules);
+  deserialize(langOptions.ModulesLocalVisibility);
   langOptions.Optimize = deserialize(langOptions.Optimize);
   langOptions.OptimizeSize = deserialize(langOptions.OptimizeSize);
   langOptions.Static = deserialize(langOptions.Static);
@@ -631,18 +620,18 @@ void deserialize(PreprocessorOptions &options) {
   deserialize(options.Macros);
   deserialize(options.Includes);
   deserialize(options.MacroIncludes);
-  deserializeAndChange(options.UsePredefines);
-  deserializeAndChange(options.DetailedRecord);
-  deserializeAndChange(options.PCHWithHdrStop);
-  deserializeAndChange(options.PCHWithHdrStopCreate);
+  deserialize(options.UsePredefines);
+  deserialize(options.DetailedRecord);
+  deserialize(options.PCHWithHdrStop);
+  deserialize(options.PCHWithHdrStopCreate);
   deserialize(options.PCHThroughHeader);
   deserialize(options.ImplicitPCHInclude);
   deserialize(options.ChainedIncludes);
-  deserializeAndChange(options.DisablePCHValidation);
-  deserializeAndChange(options.AllowPCHWithCompilerErrors);
-  deserializeAndChange(options.DumpDeserializedPCHDecls);
+  deserialize(options.DisablePCHValidation);
+  deserialize(options.AllowPCHWithCompilerErrors);
+  deserialize(options.DumpDeserializedPCHDecls);
   deserializeAndChange(options.GeneratePreamble);
-  deserializeAndChange(options.WriteCommentListToPCH);
+  deserialize(options.WriteCommentListToPCH);
   deserializeAndChange(options.SingleFileParseMode);
   deserializeAndChange(options.LexEditorPlaceholders);
   deserializeAndChange(options.RemappedFilesKeepOriginalName);
@@ -726,7 +715,7 @@ void tryCompleteData(CompilerInstance &CI, std::string wanted_obj_path) {
     if (wanted_obj_path == current_obj_path) {
       CI.getLangOpts() = std::get<1>(derialization);
       CI.getPreprocessorOpts() = std::get<2>(derialization);
-      CI.getHeaderSearchOpts() = std::get<3>(derialization);
+      //CI.getHeaderSearchOpts() = std::get<3>(derialization);
       break;
     }
   }
@@ -898,7 +887,114 @@ ClangExpressionParser::ClangExpressionParser(
 
   // 5. Set language options.
   lldb::LanguageType language = expr.Language();
+  LangOptions &lang_opts = m_compiler->getLangOpts();
 
+  switch (language) {
+  case lldb::eLanguageTypeC:
+  case lldb::eLanguageTypeC89:
+  case lldb::eLanguageTypeC99:
+  case lldb::eLanguageTypeC11:
+    // FIXME: the following language option is a temporary workaround,
+    // to "ask for C, get C++."
+    // For now, the expression parser must use C++ anytime the language is a C
+    // family language, because the expression parser uses features of C++ to
+    // capture values.
+    lang_opts.CPlusPlus = true;
+    break;
+  case lldb::eLanguageTypeObjC:
+    lang_opts.ObjC = true;
+    // FIXME: the following language option is a temporary workaround,
+    // to "ask for ObjC, get ObjC++" (see comment above).
+    lang_opts.CPlusPlus = true;
+
+    // Clang now sets as default C++14 as the default standard (with
+    // GNU extensions), so we do the same here to avoid mismatches that
+    // cause compiler error when evaluating expressions (e.g. nullptr not found
+    // as it's a C++11 feature). Currently lldb evaluates C++14 as C++11 (see
+    // two lines below) so we decide to be consistent with that, but this could
+    // be re-evaluated in the future.
+    lang_opts.CPlusPlus11 = true;
+    break;
+  case lldb::eLanguageTypeC_plus_plus:
+  case lldb::eLanguageTypeC_plus_plus_11:
+  case lldb::eLanguageTypeC_plus_plus_14:
+    lang_opts.CPlusPlus11 = true;
+    m_compiler->getHeaderSearchOpts().UseLibcxx = true;
+    LLVM_FALLTHROUGH;
+  case lldb::eLanguageTypeC_plus_plus_03:
+    lang_opts.CPlusPlus = true;
+    if (process_sp)
+      lang_opts.ObjC =
+          process_sp->GetLanguageRuntime(lldb::eLanguageTypeObjC) != nullptr;
+    break;
+  case lldb::eLanguageTypeObjC_plus_plus:
+  case lldb::eLanguageTypeUnknown:
+  default:
+    lang_opts.ObjC = true;
+    lang_opts.CPlusPlus = true;
+    lang_opts.CPlusPlus11 = true;
+    m_compiler->getHeaderSearchOpts().UseLibcxx = true;
+    break;
+  }
+
+  lang_opts.Bool = true;
+  lang_opts.WChar = true;
+  lang_opts.Blocks = true;
+  lang_opts.DebuggerSupport =
+      true; // Features specifically for debugger clients
+  if (expr.DesiredResultType() == Expression::eResultTypeId)
+    lang_opts.DebuggerCastResultToId = true;
+
+  lang_opts.CharIsSigned = ArchSpec(m_compiler->getTargetOpts().Triple.c_str())
+                               .CharIsSignedByDefault();
+
+  // Spell checking is a nice feature, but it ends up completing a lot of types
+  // that we didn't strictly speaking need to complete. As a result, we spend a
+  // long time parsing and importing debug information.
+  lang_opts.SpellChecking = false;
+
+  auto *clang_expr = dyn_cast<ClangUserExpression>(&m_expr);
+  if (clang_expr && clang_expr->DidImportCxxModules()) {
+    LLDB_LOG(log, "Adding lang options for importing C++ modules");
+
+    lang_opts.Modules = true;
+    // We want to implicitly build modules.
+    lang_opts.ImplicitModules = true;
+    // To automatically import all submodules when we import 'std'.
+    lang_opts.ModulesLocalVisibility = false;
+
+    // We use the @import statements, so we need this:
+    // FIXME: We could use the modules-ts, but that currently doesn't work.
+    lang_opts.ObjC = true;
+
+    // Options we need to parse libc++ code successfully.
+    // FIXME: We should ask the driver for the appropriate default flags.
+    lang_opts.GNUMode = true;
+    lang_opts.GNUKeywords = true;
+    lang_opts.DoubleSquareBracketAttributes = true;
+    lang_opts.CPlusPlus11 = true;
+
+    // The Darwin libc expects this macro to be set.
+    lang_opts.GNUCVersion = 40201;
+
+    SetupModuleHeaderPaths(m_compiler.get(), m_include_directories, target_sp);
+  }
+
+  if (process_sp && lang_opts.ObjC) {
+    if (auto *runtime = ObjCLanguageRuntime::Get(*process_sp)) {
+      if (runtime->GetRuntimeVersion() ==
+          ObjCLanguageRuntime::ObjCRuntimeVersions::eAppleObjC_V2)
+        lang_opts.ObjCRuntime.set(ObjCRuntime::MacOSX, VersionTuple(10, 7));
+      else
+        lang_opts.ObjCRuntime.set(ObjCRuntime::FragileMacOSX,
+                                  VersionTuple(10, 7));
+
+      if (runtime->HasNewLiteralsAndIndexing())
+        lang_opts.DebuggerObjCLiteral = true;
+    }
+  }
+
+  
   g_index = 0;
 
   std::string exe_path = exe_scope->CalculateProcess()->getPath();
@@ -924,7 +1020,8 @@ ClangExpressionParser::ClangExpressionParser(
     object::COFFObjectFile coff(memoryBuffer, ec);
     for (const auto &section : coff.sections()) {
       auto name = section.getName().get();
-      if (section.getName() && (section.getName().get() == ".llvm_co" || section.getName().get() == ".llvm_command")) {
+      if (section.getName() && (section.getName().get() == ".llvm_co" ||
+                                section.getName().get() == ".llvm_command")) {
         auto contents = section.getContents();
         if (contents) {
           auto trueContents = contents.get();
@@ -936,25 +1033,19 @@ ClangExpressionParser::ClangExpressionParser(
           auto context = exe_scope->CalculateProcess()
                              ->GetThreadList()
                              .GetSelectedThread()
-                             ->GetSelectedFrame()->GetSymbolContext(
-              lldb::eSymbolContextCompUnit);
+                             ->GetSelectedFrame()
+                             ->GetSymbolContext(lldb::eSymbolContextCompUnit);
           auto comp_unit = context.comp_unit;
-          if (nullptr == comp_unit) {
-            break;
+          if (nullptr != comp_unit) {
+            auto comp_path = comp_unit->GetPrimaryFile().GetPath();
+            tryCompleteData(*m_compiler, comp_path);
           }
-          auto comp_path = comp_unit->GetPrimaryFile().GetPath();
-          tryCompleteData(*m_compiler, comp_path);
-          break;
         }
       }
     }
   }
-  FileSpec s;
-
-  LangOptions &lang_opts = m_compiler->getLangOpts();
-
+     
   lang_opts.ThreadsafeStatics = false;
-  lang_opts.EmitAllDecls = false;
   lang_opts.AccessControl = false; // Debuggers get universal access
   lang_opts.DollarIdents = true;   // $ indicates a persistent variable name
   // We enable all builtin functions beside the builtins from libc/libm (e.g.
@@ -964,11 +1055,7 @@ ClangExpressionParser::ClangExpressionParser(
 
   // Set CodeGen options
   m_compiler->getCodeGenOpts().EmitDeclMetadata = true;
-  m_compiler->getCodeGenOpts().ControlFlowGuardNoChecks = true;
-  m_compiler->getLangOpts().setStackProtector(LangOptions::SSPOn);
-
   m_compiler->getCodeGenOpts().InstrumentFunctions = false;
-  m_compiler->getCodeGenOpts().RegisterGlobalDtorsWithAtExit = false;
   m_compiler->getCodeGenOpts().setFramePointer(
       CodeGenOptions::FramePointerKind::All);
   if (generate_debug_info)
@@ -1294,16 +1381,6 @@ unsigned ClangExpressionParser::Parse(DiagnosticManager &diagnostic_manager) {
   return ParseInternal(diagnostic_manager);
 }
 
-std::vector<std::string> splitToLines(const std::string &str) {
-  std::stringstream ss(str);
-  std::string to;
-  std::vector<std::string> res;
-  while (std::getline(ss, to, '\n')) {
-    res.push_back(to);
-  }
-  return res;
-}
-
 unsigned
 ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                      CodeCompleteConsumer *completion_consumer,
@@ -1317,20 +1394,6 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   adapter->ResetManager(&diagnostic_manager);
 
   const char *expr_text = m_expr.Text();
-
-  std::string text = expr_text;
-  auto lines = splitToLines(text);
-  std::string headers;
-  std::string newText;
-  for (const auto& line: lines) {
-    if (line.find("#include") != -1) {
-      headers += line + "\n";
-    } else {
-      newText += line + "\n";
-    }
-  }
-  newText = headers + newText;
-  expr_text = newText.c_str();
 
   clang::SourceManager &source_mgr = m_compiler->getSourceManager();
   bool created_main_file = false;
@@ -1418,10 +1481,10 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                *Consumer, TU_Complete, completion_consumer));
   m_compiler->setASTConsumer(std::move(Consumer));
 
-  if (ast_context.getLangOpts().Modules) {
-    m_compiler->createASTReader();
+  
+    //m_compiler->createASTReader();
     m_ast_context->setSema(&m_compiler->getSema());
-  }
+  
 
   ClangExpressionDeclMap *decl_map = type_system_helper->DeclMap();
   if (decl_map) {
@@ -1723,6 +1786,50 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
 
     if (execution_policy == eExecutionPolicyAlways ||
         (execution_policy != eExecutionPolicyTopLevel && !can_interpret)) {
+      if (m_expr.NeedsValidation() && process) {
+        if (!process->GetDynamicCheckers()) {
+          ClangDynamicCheckerFunctions *dynamic_checkers =
+              new ClangDynamicCheckerFunctions();
+
+          DiagnosticManager install_diagnostics;
+
+          if (!dynamic_checkers->Install(install_diagnostics, exe_ctx)) {
+            if (install_diagnostics.Diagnostics().size())
+              err.SetErrorString(install_diagnostics.GetString().c_str());
+            else
+              err.SetErrorString("couldn't install checkers, unknown error");
+
+            return err;
+          }
+
+          process->SetDynamicCheckers(dynamic_checkers);
+
+          LLDB_LOGF(log, "== [ClangExpressionParser::PrepareForExecution] "
+                         "Finished installing dynamic checkers ==");
+        }
+
+        if (auto *checker_funcs = llvm::dyn_cast<ClangDynamicCheckerFunctions>(
+                process->GetDynamicCheckers())) {
+          IRDynamicChecks ir_dynamic_checks(*checker_funcs,
+                                            function_name.AsCString());
+
+          llvm::Module *module = execution_unit_sp->GetModule();
+          if (!module || !ir_dynamic_checks.runOnModule(*module)) {
+            err.SetErrorToGenericError();
+            err.SetErrorString("Couldn't add dynamic checks to the expression");
+            return err;
+          }
+
+          if (custom_passes.LatePasses) {
+            LLDB_LOGF(log,
+                      "%s - Running Late IR Passes from LanguageRuntime on "
+                      "expression module '%s'",
+                      __FUNCTION__, m_expr.FunctionName());
+
+            custom_passes.LatePasses->run(*module);
+          }
+        }
+      }
     }
 
     if (execution_policy == eExecutionPolicyAlways ||

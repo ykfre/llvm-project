@@ -1044,39 +1044,52 @@ void ClangExpressionDeclMap::LookupInModulesDeclVendor(
     return;
 
   bool append = false;
-  uint32_t max_matches = 1;
+  uint32_t max_matches = 0xffffffff;
   std::vector<clang::NamedDecl *> decls;
 
-  if (!modules_decl_vendor->FindDecls(name, append, max_matches, decls))
+  if (!modules_decl_vendor->FindDecls((clang::DeclContext *)context.m_decl_context, name,
+                                      append, max_matches, decls))
     return;
 
   assert(!decls.empty() && "FindDecls returned true but no decls?");
-  clang::NamedDecl *const decl_from_modules = decls[0];
-
-  LLDB_LOG(log,
-           "  CAS::FEVD[{0}] Matching decl found for "
-           "\"{1}\" in the modules",
-           current_id, name);
-
-  clang::Decl *copied_decl = CopyDecl(decl_from_modules);
-  if (!copied_decl) {
+  for (const auto& decl: decls) {
     LLDB_LOG(log,
-             "  CAS::FEVD[{0}] - Couldn't export a "
-             "declaration from the modules",
-             current_id);
-    return;
-  }
+             "  CAS::FEVD[{0}] Matching decl found for "
+             "\"{1}\" in the modules",
+             current_id, name);
+    auto copied_decl = CopyDecl(decl);
+    if (!copied_decl) {
+      LLDB_LOG(log,
+               "  CAS::FEVD[{0}] - Couldn't export a "
+               "declaration from the modules",
+               current_id);
+      return;
+    }
 
-  if (auto copied_function = dyn_cast<clang::FunctionDecl>(copied_decl)) {
-    MaybeRegisterFunctionBody(copied_function);
+    if (auto copied_function = dyn_cast<clang::FunctionDecl>(copied_decl)) {
+      MaybeRegisterFunctionBody(copied_function);
 
-    context.AddNamedDecl(copied_function);
+      context.AddNamedDecl(copied_function);
 
-    context.m_found.function_with_type_info = true;
-    context.m_found.function = true;
-  } else if (auto copied_var = dyn_cast<clang::VarDecl>(copied_decl)) {
-    context.AddNamedDecl(copied_var);
-    context.m_found.variable = true;
+      context.m_found.function_with_type_info = true;
+      context.m_found.function = true;
+    } else if (auto copied_var = dyn_cast<clang::VarDecl>(copied_decl)) {
+      context.AddNamedDecl(copied_var);
+      context.m_found.variable = true;
+    } else if (auto copied_var = dyn_cast<clang::CXXRecordDecl>(copied_decl)) {
+      context.AddNamedDecl(copied_var);
+      context.m_found.type = true;
+    } else if (auto copied_var = dyn_cast<clang::TemplateDecl>(copied_decl)) {
+      context.AddNamedDecl(copied_var);
+      context.m_found.type = true;
+    } else if (auto copied_var = dyn_cast<clang::ClassTemplateSpecializationDecl>(copied_decl)) {
+      context.AddNamedDecl(copied_var);
+      context.m_found.type = true;
+    }
+    else if (auto copied_var = dyn_cast<clang::ClassTemplatePartialSpecializationDecl>(copied_decl)) {
+      context.AddNamedDecl(copied_var);
+      context.m_found.type = true;
+    }
   }
 }
 
@@ -1237,7 +1250,7 @@ void ClangExpressionDeclMap::LookupFunction(NameSearchContext &context,
   if (target) {
     if (ClangModulesDeclVendor *decl_vendor =
             target->GetClangModulesDeclVendor()) {
-      decl_vendor->FindDecls(name, false, UINT32_MAX, decls_from_modules);
+      decl_vendor->FindDecls((clang::DeclContext* )context.m_decl_context, name, false, UINT32_MAX, decls_from_modules);
     }
   }
 

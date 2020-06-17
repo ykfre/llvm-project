@@ -535,7 +535,9 @@ bool AppleObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl) {
   return true;
 }
 
-uint32_t AppleObjCDeclVendor::FindDecls(ConstString name, bool append,
+uint32_t AppleObjCDeclVendor::FindDecls(clang::DeclContext *,
+    ConstString name,
+                               bool append,
                                         uint32_t max_matches,
                                         std::vector<CompilerDecl> &decls) {
   static unsigned int invocation_id = 0;

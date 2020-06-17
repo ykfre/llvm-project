@@ -6,8 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <mutex>
-
+#include "clang/AST/Decl.h"
+#include "clang/AST/DeclBase.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -19,6 +20,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Threading.h"
+#include <iostream>
+#include <mutex>
 
 #include "ClangHost.h"
 #include "ClangModulesDeclVendor.h"
@@ -79,11 +82,13 @@ public:
   bool AddModulesForCompileUnit(CompileUnit &cu, ModuleVector &exported_modules,
                                 Stream &error_stream) override;
 
-  uint32_t FindDecls(ConstString name, bool append, uint32_t max_matches,
+  uint32_t FindDecls(clang::DeclContext *context, ConstString name, bool append,
+                     uint32_t max_matches,
                      std::vector<CompilerDecl> &decls) override;
 
   void ForEachMacro(const ModuleVector &modules,
                     std::function<bool(const std::string &)> handler) override;
+
 private:
   void
   ReportModuleExportsHelper(std::set<ClangModulesDeclVendor::ModuleID> &exports,
@@ -160,7 +165,8 @@ ClangModulesDeclVendorImpl::ClangModulesDeclVendorImpl(
       m_parser(std::move(parser)) {
 
   // Initialize our ClangASTContext.
-  m_ast_context.reset(new ClangASTContext(m_compiler_instance->getASTContext()));
+  m_ast_context.reset(
+      new ClangASTContext(m_compiler_instance->getASTContext()));
 }
 
 void ClangModulesDeclVendorImpl::ReportModuleExportsHelper(
@@ -222,7 +228,7 @@ bool ClangModulesDeclVendorImpl::AddModule(const SourceModule &module,
   }
 
   clang::HeaderSearch &HS =
-    m_compiler_instance->getPreprocessor().getHeaderSearchInfo();
+      m_compiler_instance->getPreprocessor().getHeaderSearchInfo();
 
   if (module.search_path) {
     auto path_begin = llvm::sys::path::begin(module.search_path.GetStringRef());
@@ -250,7 +256,7 @@ bool ClangModulesDeclVendorImpl::AddModule(const SourceModule &module,
       auto *file = HS.lookupModuleMapFile(*dir, is_framework);
       if (!file)
         return error();
-      if (!HS.loadModuleMapFile(file, is_system))
+      if (HS.loadModuleMapFile(file, is_system))
         return error();
     }
   }
@@ -294,7 +300,8 @@ bool ClangModulesDeclVendorImpl::AddModule(const SourceModule &module,
 
   clang::Module *submodule = top_level_module;
 
-  for (auto &component : llvm::ArrayRef<ConstString>(module.path).drop_front()) {
+  for (auto &component :
+       llvm::ArrayRef<ConstString>(module.path).drop_front()) {
     submodule = submodule->findSubmodule(component.GetStringRef());
     if (!submodule) {
       diagnostic_consumer->DumpDiagnostics(error_stream);
@@ -353,10 +360,78 @@ bool ClangModulesDeclVendorImpl::AddModulesForCompileUnit(
 
 // ClangImporter::lookupValue
 
-uint32_t
-ClangModulesDeclVendorImpl::FindDecls(ConstString name, bool append,
-                                      uint32_t max_matches,
-                                      std::vector<CompilerDecl> &decls) {
+class ExampleVisitor : public clang::RecursiveASTVisitor<ExampleVisitor> {
+public:
+  ExampleVisitor(const std::string &wantedDeclName) {
+    m_wantedDeclName = wantedDeclName;
+  }
+
+  std::vector<clang::NamedDecl *> getWatnedDecls(clang::ASTContext &AST) {
+    TraverseAST(AST);
+    return m_watnedDecls;
+  }
+
+  bool TraverseClassTemplateDecl(clang::ClassTemplateDecl *decl) {
+
+    if (dynamic_cast<clang::NamedDecl *>(decl) &&
+        decl->isThisDeclarationADefinition()) {
+      if (m_wantedDeclName == decl->getTemplatedDecl()->getName().str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<
+        ExampleVisitor>::TraverseClassTemplateDecl(decl);
+  }
+
+  bool TraverseClassTemplatePartialSpecializationDecl(
+      clang::ClassTemplatePartialSpecializationDecl *decl) {
+    
+    if (dynamic_cast<clang::NamedDecl *>(decl) &&
+        decl->isThisDeclarationADefinition()) {
+      auto templated = decl->getSpecializedTemplate()->getTemplatedDecl();
+      if (m_wantedDeclName == templated->getName()
+                                  .str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<
+        ExampleVisitor>::TraverseClassTemplatePartialSpecializationDecl(decl);
+  }
+
+  bool TraverseClassTemplateSpecializationDecl(
+      clang::ClassTemplateSpecializationDecl *decl) {
+
+    if (dynamic_cast<clang::NamedDecl *>(decl) &&
+        decl->isThisDeclarationADefinition()) {
+      if (m_wantedDeclName == decl->getSpecializedTemplate()
+                                  ->getTemplatedDecl()
+                                  ->getName()
+                                  .str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<
+        ExampleVisitor>::TraverseClassTemplateSpecializationDecl(decl);
+  }
+
+  bool TraverseNamespaceDecl(clang::NamespaceDecl *decl) {
+    if (dynamic_cast<clang::NamedDecl *>(decl)) {
+      if (m_wantedDeclName == decl->getName().str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<ExampleVisitor>::TraverseNamespaceDecl(
+        decl);
+  }
+
+private:
+  std::string m_wantedDeclName;
+  std::vector<clang::NamedDecl *> m_watnedDecls;
+};
+
+uint32_t ClangModulesDeclVendorImpl::FindDecls(
+    clang::DeclContext *context, ConstString name, bool append,
+    uint32_t max_matches, std::vector<CompilerDecl> &decls) {
   if (!m_enabled) {
     return 0;
   }
@@ -364,21 +439,36 @@ ClangModulesDeclVendorImpl::FindDecls(ConstString name, bool append,
   if (!append)
     decls.clear();
 
+  auto scopeToSearchFor =
+      (clang::DeclContext *)m_compiler_instance->getASTContext()
+          .getTranslationUnitDecl();
+  auto namspeace = context->getEnclosingNamespaceContext();
+  if (namspeace) {
+    if (namspeace->isNamespace()) {
+      auto wantedNamespace = (clang::NamespaceDecl *)namspeace;
+      scopeToSearchFor = (clang::DeclContext *)namspeace;
+    }
+  }
   clang::IdentifierInfo &ident =
       m_compiler_instance->getASTContext().Idents.get(name.GetStringRef());
-
+  ExampleVisitor example(name.GetStringRef().str());
+  auto wanted_decls =
+      example.getWatnedDecls(m_compiler_instance->getASTContext());
   clang::LookupResult lookup_result(
       m_compiler_instance->getSema(), clang::DeclarationName(&ident),
       clang::SourceLocation(), clang::Sema::LookupOrdinaryName);
 
   m_compiler_instance->getSema().LookupName(
       lookup_result,
-      m_compiler_instance->getSema().getScopeForContext(
-          m_compiler_instance->getASTContext().getTranslationUnitDecl()));
+      m_compiler_instance->getSema().getScopeForContext(scopeToSearchFor));
 
   uint32_t num_matches = 0;
+  std::vector<clang::NamedDecl *> decls_result(lookup_result.begin(),
+                                               lookup_result.end());
 
-  for (clang::NamedDecl *named_decl : lookup_result) {
+  decls_result.insert(decls_result.begin(), wanted_decls.begin(),
+                      wanted_decls.end());
+  for (clang::NamedDecl *named_decl : decls_result) {
     if (num_matches >= max_matches)
       return num_matches;
 
