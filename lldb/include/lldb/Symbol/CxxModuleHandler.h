@@ -30,6 +30,7 @@ namespace lldb_private {
 /// that instantiating this template is safe to do, e.g. because the target
 /// decl is a container class from the STL.
 class CxxModuleHandler {
+public:
   /// The ASTImporter that should be used to import any Decls which aren't
   /// directly handled by this class itself.
   clang::ASTImporter *m_importer = nullptr;
@@ -45,6 +46,9 @@ class CxxModuleHandler {
   /// context (designated by m_sema).
   llvm::Optional<clang::Decl *> tryInstantiateStdTemplate(clang::Decl *d);
 
+private:
+  clang::ASTContext *m_target;
+
 public:
   CxxModuleHandler() = default;
   CxxModuleHandler(clang::ASTImporter &importer, clang::ASTContext *target);
@@ -54,6 +58,7 @@ public:
   /// Decl has been deserialized from the 'std' module. Otherwise this function
   /// returns nothing.
   llvm::Optional<clang::Decl *> Import(clang::Decl *d);
+
 
   /// Returns true iff this instance is capable of importing any declarations
   /// in the target ASTContext.

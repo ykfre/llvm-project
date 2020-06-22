@@ -7,11 +7,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Symbol/CxxModuleHandler.h"
-
+#include "clang/AST/ASTConsumer.h"
+#include "clang/Frontend/ASTConsumers.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Utility/Log.h"
 #include "clang/Sema/Lookup.h"
+#include "clang/AST/Decl.h"
 #include "llvm/Support/Error.h"
+
+#include "clang/AST/RecursiveASTVisitor.h"
 
 using namespace lldb_private;
 using namespace clang;
@@ -121,6 +125,11 @@ getEqualLocalDeclContext(Sema &sema, DeclContext *foreign_ctxt) {
   while (foreign_ctxt && foreign_ctxt->isInlineNamespace())
     foreign_ctxt = foreign_ctxt->getParent();
 
+  if (auto namespaceDecl = dyn_cast <clang::NamespaceDecl>(foreign_ctxt)) {
+    if (namespaceDecl->getNameAsString() == "") {
+      return sema.getASTContext().getTranslationUnitDecl();
+    }
+  }
   // If the foreign context is the TU, we just return the local TU.
   if (foreign_ctxt->isTranslationUnit())
     return sema.getASTContext().getTranslationUnitDecl();
@@ -174,6 +183,71 @@ T *createDecl(ASTImporter &importer, Decl *from_d, Args &&... args) {
   return to_d;
 }
 
+class ExampleVisitor2 : public clang::RecursiveASTVisitor<ExampleVisitor2> {
+public:
+  ExampleVisitor2(const std::string &wantedDeclName) {
+    m_wantedDeclName = wantedDeclName;
+  }
+
+  std::vector<clang::NamedDecl *> getWatnedDecls(clang::ASTContext &AST) {
+    TraverseAST(AST);
+    return m_watnedDecls;
+  }
+
+  bool TraverseClassTemplateDecl(clang::ClassTemplateDecl *decl) {
+
+    if (dynamic_cast<clang::NamedDecl *>(decl)) {
+      if (m_wantedDeclName == decl->getTemplatedDecl()->getName().str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<
+        ExampleVisitor2>::TraverseClassTemplateDecl(decl);
+  }
+
+  bool TraverseClassTemplatePartialSpecializationDecl(
+      clang::ClassTemplatePartialSpecializationDecl *decl) {
+
+    if (dynamic_cast<clang::NamedDecl *>(decl) &&
+        decl->isThisDeclarationADefinition()) {
+      auto templated = decl->getSpecializedTemplate()->getTemplatedDecl();
+      if (m_wantedDeclName == templated->getName().str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<
+        ExampleVisitor2>::TraverseClassTemplatePartialSpecializationDecl(decl);
+  }
+
+  bool TraverseClassTemplateSpecializationDecl(
+      clang::ClassTemplateSpecializationDecl *decl) {
+
+    if (dynamic_cast<clang::NamedDecl *>(decl) &&
+        decl->isThisDeclarationADefinition()) {
+      if (m_wantedDeclName ==
+          decl->getSpecializedTemplate()->getTemplatedDecl()->getName().str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<
+        ExampleVisitor2>::TraverseClassTemplateSpecializationDecl(decl);
+  }
+
+  bool TraverseNamespaceDecl(clang::NamespaceDecl *decl) {
+    if (dynamic_cast<clang::NamedDecl *>(decl)) {
+      if (m_wantedDeclName == decl->getName().str()) {
+        m_watnedDecls.push_back(decl);
+      }
+    }
+    return clang::RecursiveASTVisitor<ExampleVisitor2>::TraverseNamespaceDecl(
+        decl);
+  }
+
+private:
+  std::string m_wantedDeclName;
+  std::vector<clang::NamedDecl *> m_watnedDecls;
+};
+
 llvm::Optional<Decl *> CxxModuleHandler::tryInstantiateStdTemplate(Decl *d) {
   Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS);
 
@@ -182,20 +256,15 @@ llvm::Optional<Decl *> CxxModuleHandler::tryInstantiateStdTemplate(Decl *d) {
   if (!td)
     return {};
 
-  // We only care about templates in the std namespace.
-  if (!td->getDeclContext()->isStdNamespace())
-    return {};
-
-  // We have a whitelist of supported template names.
-  if (m_supported_templates.find(td->getName()) == m_supported_templates.end())
-    return {};
-
   // Early check if we even support instantiating this template. We do this
   // before we import anything into the target AST.
   auto &foreign_args = td->getTemplateInstantiationArgs();
   if (!templateArgsAreSupported(foreign_args.asArray()))
     return {};
+  auto dumper = clang::CreateASTDumper(nullptr /*Dump to stdout.*/, "", true,
+                                       false, false, clang::ADOF_Default);
 
+  dumper->HandleTranslationUnit(m_sema->getASTContext());
   // Find the local DeclContext that corresponds to the DeclContext of our
   // decl we want to import.
   llvm::Expected<DeclContext *> to_context =

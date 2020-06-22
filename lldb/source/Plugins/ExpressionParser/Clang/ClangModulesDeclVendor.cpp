@@ -367,17 +367,43 @@ public:
   }
 
   std::vector<clang::NamedDecl *> getWatnedDecls(clang::ASTContext &AST) {
-    TraverseAST(AST);
-    return m_watnedDecls;
+    if (!s_is_cached_decls) {
+      s_is_cached_decls = true;
+      TraverseAST(AST);
+    }
+    std::vector<clang::NamedDecl *> wanted_decls;
+    for (const auto& decl: s_cached_decls) {
+      if (auto var = llvm::dyn_cast < clang::ClassTemplateDecl>(decl)) {
+        if (m_wantedDeclName == var->getTemplatedDecl()->getName().str()) {
+          wanted_decls.push_back(decl);
+        } else if (auto var = llvm::dyn_cast<
+                       clang::ClassTemplatePartialSpecializationDecl>(decl)) {
+          auto templated = var->getSpecializedTemplate()->getTemplatedDecl();
+          if (m_wantedDeclName == templated->getName()) {
+            wanted_decls.push_back(decl);
+          }
+        } else if (auto var =
+                       llvm::dyn_cast<
+                       clang::ClassTemplateSpecializationDecl>(decl)) {
+          auto templated = var->getSpecializedTemplate()
+                                                   ->getTemplatedDecl()
+                                                   ->getName()
+                                                   .str();
+          if (m_wantedDeclName == templated) {
+            wanted_decls.push_back(decl);
+          }
+        }
+      }
+    }
+    return wanted_decls;
   }
 
   bool TraverseClassTemplateDecl(clang::ClassTemplateDecl *decl) {
 
     if (dynamic_cast<clang::NamedDecl *>(decl) &&
         decl->isThisDeclarationADefinition()) {
-      if (m_wantedDeclName == decl->getTemplatedDecl()->getName().str()) {
-        m_watnedDecls.push_back(decl);
-      }
+      s_cached_decls.push_back(decl);
+
     }
     return clang::RecursiveASTVisitor<
         ExampleVisitor>::TraverseClassTemplateDecl(decl);
@@ -388,11 +414,7 @@ public:
     
     if (dynamic_cast<clang::NamedDecl *>(decl) &&
         decl->isThisDeclarationADefinition()) {
-      auto templated = decl->getSpecializedTemplate()->getTemplatedDecl();
-      if (m_wantedDeclName == templated->getName()
-                                  .str()) {
-        m_watnedDecls.push_back(decl);
-      }
+      s_cached_decls.push_back(decl);
     }
     return clang::RecursiveASTVisitor<
         ExampleVisitor>::TraverseClassTemplatePartialSpecializationDecl(decl);
@@ -403,12 +425,7 @@ public:
 
     if (dynamic_cast<clang::NamedDecl *>(decl) &&
         decl->isThisDeclarationADefinition()) {
-      if (m_wantedDeclName == decl->getSpecializedTemplate()
-                                  ->getTemplatedDecl()
-                                  ->getName()
-                                  .str()) {
-        m_watnedDecls.push_back(decl);
-      }
+      s_cached_decls.push_back(decl);
     }
     return clang::RecursiveASTVisitor<
         ExampleVisitor>::TraverseClassTemplateSpecializationDecl(decl);
@@ -417,7 +434,6 @@ public:
   bool TraverseNamespaceDecl(clang::NamespaceDecl *decl) {
     if (dynamic_cast<clang::NamedDecl *>(decl)) {
       if (m_wantedDeclName == decl->getName().str()) {
-        m_watnedDecls.push_back(decl);
       }
     }
     return clang::RecursiveASTVisitor<ExampleVisitor>::TraverseNamespaceDecl(
@@ -426,8 +442,13 @@ public:
 
 private:
   std::string m_wantedDeclName;
-  std::vector<clang::NamedDecl *> m_watnedDecls;
+  static bool s_is_cached_decls;
+  static std::vector<clang::NamedDecl *> s_cached_decls;
 };
+
+bool ExampleVisitor::s_is_cached_decls = false;
+std::vector<clang::NamedDecl *> ExampleVisitor::s_cached_decls{};
+
 
 uint32_t ClangModulesDeclVendorImpl::FindDecls(
     clang::DeclContext *context, ConstString name, bool append,

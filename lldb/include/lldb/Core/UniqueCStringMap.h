@@ -36,37 +36,11 @@ public:
   // then later call UniqueCStringMap<T>::Sort() before doing any searches by
   // name.
   void Append(ConstString unique_cstr, const T &value) {
-
-    auto unique_cstr2 = ConstString(std::regex_replace(
-        unique_cstr.GetStringRef().str(), std::regex(" const"), ""));
-    unique_cstr2 = ConstString(std::regex_replace(
-        unique_cstr2.GetStringRef().str(), std::regex("const"), ""));
-
-    unique_cstr2 = ConstString(std::regex_replace(
-        unique_cstr2.GetStringRef().str(), std::regex("struct"), ""));
-    unique_cstr2 = ConstString(std::regex_replace(
-        unique_cstr2.GetStringRef().str(), std::regex("class"), ""));
-
-    unique_cstr2 = ConstString(std::regex_replace(
-        unique_cstr2.GetStringRef().str(), std::regex(" "), ""));
-    m_map.push_back(typename UniqueCStringMap<T>::Entry(unique_cstr2, value));
+    m_map.push_back(typename UniqueCStringMap<T>::Entry(unique_cstr, value));
   }
 
   void Append(const Entry &e) {
-    auto entry2 = e;
-    entry2.cstring = ConstString(std::regex_replace(
-        e.cstring.GetStringRef().str(), std::regex(" const "), ""));
-    entry2.cstring = ConstString(std::regex_replace(
-        e.cstring.GetStringRef().str(), std::regex("const"), ""));
-
-    entry2.cstring = ConstString(std::regex_replace(
-        e.cstring.GetStringRef().str(), std::regex("class"), ""));
-
-    entry2.cstring = ConstString(std::regex_replace(
-        e.cstring.GetStringRef().str(), std::regex("struct"), ""));
-    entry2.cstring = ConstString(std::regex_replace(
-        e.cstring.GetStringRef().str(), std::regex(" "), ""));
-    m_map.push_back(entry2);
+    m_map.push_back(e);
   }
 
   void Clear() { m_map.clear(); }

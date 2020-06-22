@@ -253,9 +253,9 @@ public:
 
     void StartTranslationUnit(clang::ASTConsumer *Consumer) override {
       return m_original.StartTranslationUnit(Consumer);
+
     }
 
-  private:
     ClangASTSource &m_original;
   };
 

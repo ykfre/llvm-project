@@ -5,17 +5,19 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-
 #include "lldb/Symbol/ClangASTImporter.h"
+#include "Plugins/ExpressionParser/Clang/ClangASTSource.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/ClangASTMetadata.h"
 #include "lldb/Symbol/ClangUtil.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Log.h"
+#include "clang/AST/ASTConsumer.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/Frontend/ASTConsumers.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/Support/raw_ostream.h"
@@ -46,10 +48,8 @@ CompilerType ClangASTImporter::CopyType(ClangASTContext &dst_ast,
 
   llvm::Expected<QualType> ret_or_error = delegate_sp->Import(src_qual_type);
   if (!ret_or_error) {
-    Log *log =
-      lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS);
-    LLDB_LOG_ERROR(log, ret_or_error.takeError(),
-        "Couldn't import type: {0}");
+    Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS);
+    LLDB_LOG_ERROR(log, ret_or_error.takeError(), "Couldn't import type: {0}");
     return CompilerType();
   }
 
@@ -226,8 +226,8 @@ public:
   /// \param dst_ctx The ASTContext to which Decls are imported.
   /// \param src_ctx The ASTContext from which Decls are imported.
   explicit CompleteTagDeclsScope(ClangASTImporter &importer,
-                            clang::ASTContext *dst_ctx,
-                            clang::ASTContext *src_ctx)
+                                 clang::ASTContext *dst_ctx,
+                                 clang::ASTContext *src_ctx)
       : m_delegate(importer.GetDelegate(dst_ctx, src_ctx)), m_dst_ctx(dst_ctx),
         m_src_ctx(src_ctx), importer(importer) {
     m_delegate->SetImportListener(this);
@@ -241,7 +241,6 @@ public:
     while (!m_decls_to_complete.empty()) {
       NamedDecl *decl = m_decls_to_complete.pop_back_val();
       m_decls_already_completed.insert(decl);
-
 
       Decl *original_decl = to_context_md->m_origins[decl].decl;
 
@@ -540,7 +539,7 @@ bool ClangASTImporter::LayoutRecordType(
 }
 
 void ClangASTImporter::SetRecordLayout(clang::RecordDecl *decl,
-                                        const LayoutInfo &layout) {
+                                       const LayoutInfo &layout) {
   m_record_decl_to_layout_map.insert(std::make_pair(decl, layout));
 }
 
@@ -853,20 +852,115 @@ void ClangASTImporter::ForgetSource(clang::ASTContext *dst_ast,
 
 ClangASTImporter::MapCompleter::~MapCompleter() { return; }
 
+/// Constructor function for Clang declarations. Ensures that the created
+/// declaration is registered with the ASTImporter.
+template <typename T, typename... Args>
+T *createDecl(ASTImporter &importer, Decl *from_d, Args &&... args) {
+  T *to_d = T::Create(std::forward<Args>(args)...);
+  importer.RegisterImportedDecl(from_d, to_d);
+  return to_d;
+}
+
+/// Returns true iff tryInstantiateStdTemplate supports instantiating a template
+/// with the given template arguments.
+static bool templateArgsAreSupported(ArrayRef<TemplateArgument> a) {
+  for (const TemplateArgument &arg : a) {
+    switch (arg.getKind()) {
+    case TemplateArgument::Type:
+    case TemplateArgument::Integral:
+      break;
+    default:
+      // TemplateArgument kind hasn't been handled yet.
+      return false;
+    }
+  }
+  return true;
+}
+
+llvm::Expected<clang::Decl *>
+ClangASTImporter::ASTImporterDelegate::handleStdHandler(clang::Decl *From) {
+  return nullptr;
+  if (m_std_handler && m_std_handler->m_sema) {
+    auto externalSource =
+        m_std_handler->m_sema->getASTContext().getExternalSource();
+    if (auto clangAst =
+            dyn_cast<lldb_private::ClangASTSource::ClangASTSourceProxy>(
+                externalSource)) {
+      auto td = dyn_cast<ClassTemplateSpecializationDecl>(From);
+
+      if (!td)
+        return nullptr;
+      // Early check if we even support instantiating this template. We do this
+      // before we import anything into the target AST.
+      auto &foreign_args = td->getTemplateInstantiationArgs();
+      if (!templateArgsAreSupported(foreign_args.asArray()))
+        return nullptr;
+      std::vector<NamedDecl *> decls;
+      if (!clangAst->findByModules(
+              From->getDeclContext(),
+              ConstString(td->getSpecializedTemplate()->getNameAsString()),
+              decls)) {
+        return nullptr;
+      }
+      ClassTemplateDecl *new_class_template = nullptr;
+      for (auto LD : decls) {
+        if ((new_class_template = dyn_cast<ClassTemplateDecl>(LD)))
+          break;
+      }
+      if (!new_class_template)
+        return nullptr;
+      if (new_class_template->getFirstDecl() ==
+          td->getSpecializedTemplate()->getFirstDecl()) {
+        return nullptr;
+      }
+      // Find the class template specialization declaration that
+      // corresponds to these arguments.
+      void *InsertPos = nullptr;
+      ClassTemplateSpecializationDecl *result =
+          new_class_template->findSpecialization(
+              td->getTemplateInstantiationArgs().asArray(), InsertPos);
+      if (nullptr != result) {
+        auto new_decl = clangAst->m_original.CopyDecl(result);
+        if (nullptr != new_decl) {
+          RegisterImportedDecl(From, new_decl);
+        }
+        return new_decl;
+      }
+      // Instantiate the template.
+      result = ClassTemplateSpecializationDecl::Create(
+          new_class_template->getASTContext(),
+          new_class_template->getTemplatedDecl()->getTagKind(),
+          new_class_template->getDeclContext(),
+          new_class_template->getTemplatedDecl()->getLocation(),
+          new_class_template->getLocation(), new_class_template,
+          td->getTemplateInstantiationArgs().asArray(), nullptr);
+
+      new_class_template->AddSpecialization(result, InsertPos);
+      auto new_decl =  clangAst->m_original.CopyDecl(result);
+      if (nullptr != new_decl) {
+        RegisterImportedDecl(From, new_decl);
+      }
+      return new_decl;
+    }
+  }
+  return nullptr;
+}
+
 llvm::Expected<Decl *>
 ClangASTImporter::ASTImporterDelegate::ImportImpl(Decl *From) {
   if (m_std_handler) {
-    llvm::Optional<Decl *> D = m_std_handler->Import(From);
-    if (D) {
-      // Make sure we don't use this decl later to map it back to it's original
-      // decl. The decl the CxxModuleHandler created has nothing to do with
-      // the one from debug info, and linking those two would just cause the
-      // ASTImporter to try 'updating' the module decl with the minimal one from
-      // the debug info.
+    llvm::Expected<Decl *> D = handleStdHandler(From);
+    if (D && D.get() != nullptr) {
+      // Make sure we don't use this decl later to map it back to it's
+      // original decl. The decl the CxxModuleHandler created has nothing to
+      // do with the one from debug info, and linking those two would just
+      // cause the ASTImporter to try 'updating' the module decl with the
+      // minimal one from the debug info.
       m_decls_to_ignore.insert(*D);
       return *D;
     }
   }
+  SmallVector<Decl *, 4> Result;
 
   // Check which ASTContext this declaration originally came from.
   DeclOrigin origin = m_master.GetDeclOrigin(From);
@@ -880,8 +974,8 @@ ClangASTImporter::ASTImporterDelegate::ImportImpl(Decl *From) {
   // into the same ASTContext where it came from (which doesn't make a lot of
   // sense).
   if (origin.Valid() && origin.ctx == &getToContext()) {
-      RegisterImportedDecl(From, origin.decl);
-      return origin.decl;
+    RegisterImportedDecl(From, origin.decl);
+    return origin.decl;
   }
 
   // This declaration came originally from another ASTContext. Instead of
@@ -900,8 +994,35 @@ ClangASTImporter::ASTImporterDelegate::ImportImpl(Decl *From) {
       return R;
     }
   }
-
-  return ASTImporter::ImportImpl(From);
+  auto imported = ASTImporter::ImportImpl(From);
+  if (imported) {
+    if (false) {
+      llvm::Optional<Decl *> D = m_std_handler->Import(From);
+      if (D) {
+        // Make sure we don't use this decl later to map it back to it's
+        // original decl. The decl the CxxModuleHandler created has nothing to
+        // do with the one from debug info, and linking those two would just
+        // cause the ASTImporter to try 'updating' the module decl with the
+        // minimal one from the debug info.
+        m_decls_to_ignore.insert(*D);
+        return *D;
+      }
+    }
+    /*    if (m_std_handler) {
+      llvm::Expected<Decl *> D = handleStdHandler(imported.get());
+      if (D.get() != nullptr) {
+        // Make sure we don't use this decl later to map it back to it's
+        // original decl. The decl the CxxModuleHandler created has nothing to
+        // do with the one from debug info, and linking those two would just
+        // cause the ASTImporter to try 'updating' the module decl with the
+        // minimal one from the debug info.
+        m_decls_to_ignore.insert(*D);
+        return *D;
+      }
+    }
+    */
+  }
+  return imported;
 }
 
 void ClangASTImporter::ASTImporterDelegate::ImportDefinitionTo(
@@ -938,9 +1059,10 @@ void ClangASTImporter::ASTImporterDelegate::ImportDefinitionTo(
           from_named_decl->printName(name_stream);
           name_stream.flush();
         }
-        LLDB_LOG(log_ast, "==== [ClangASTImporter][TUDecl: {0}] Imported "
-                          "({1}Decl*){2}, named {3} (from "
-                          "(Decl*){4})",
+        LLDB_LOG(log_ast,
+                 "==== [ClangASTImporter][TUDecl: {0}] Imported "
+                 "({1}Decl*){2}, named {3} (from "
+                 "(Decl*){4})",
                  static_cast<void *>(to->getTranslationUnitDecl()),
                  from->getDeclKindName(), static_cast<void *>(to), name_string,
                  static_cast<void *>(from));

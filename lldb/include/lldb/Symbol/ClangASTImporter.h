@@ -13,7 +13,7 @@
 #include <memory>
 #include <set>
 #include <vector>
-
+#include "clang/AST/Decl.h"
 #include "clang/AST/ASTImporter.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/Decl.h"
@@ -186,6 +186,7 @@ public:
   /// CxxModuleHandler to replace any missing or malformed declarations with
   /// their counterpart from a C++ module.
   struct ASTImporterDelegate : public clang::ASTImporter {
+
     ASTImporterDelegate(ClangASTImporter &master, clang::ASTContext *target_ctx,
                         clang::ASTContext *source_ctx)
         : clang::ASTImporter(*target_ctx, master.m_file_manager, *source_ctx,
@@ -193,6 +194,8 @@ public:
           m_master(master), m_source_ctx(source_ctx) {
       setODRHandling(clang::ASTImporter::ODRHandlingType::Liberal);
     }
+
+    llvm::Expected<clang::Decl *> handleStdHandler(clang::Decl *From);
 
     /// Scope guard that attaches a CxxModuleHandler to an ASTImporterDelegate
     /// and deattaches it at the end of the scope. Supports being used multiple
@@ -238,6 +241,7 @@ public:
     void RemoveImportListener() { m_new_decl_listener = nullptr; }
 
   protected:
+    
     llvm::Expected<clang::Decl *> ImportImpl(clang::Decl *From) override;
 
   private:
