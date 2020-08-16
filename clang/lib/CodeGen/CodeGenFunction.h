@@ -2465,6 +2465,8 @@ public:
   void EmitExprAsInit(const Expr *init, const ValueDecl *D, LValue lvalue,
                       bool capturedByInit);
 
+  void addCallToTempSehFunc();
+
   /// hasVolatileMember - returns true if aggregate type has a volatile
   /// member.
   bool hasVolatileMember(QualType T) {

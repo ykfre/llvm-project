@@ -412,10 +412,12 @@ public:
 
   Status ReturnFromFrameWithIndex(uint32_t frame_idx,
                                   lldb::ValueObjectSP return_value_sp,
+      lldb_private::ExecutionContext &executionContext,
                                   bool broadcast = false);
 
   Status ReturnFromFrame(lldb::StackFrameSP frame_sp,
                          lldb::ValueObjectSP return_value_sp,
+      lldb_private::ExecutionContext &executionContext,
                          bool broadcast = false);
 
   Status JumpToLine(const FileSpec &file, uint32_t line,
@@ -1257,6 +1259,12 @@ private:
   bool m_extended_info_fetched; // Have we tried to retrieve the m_extended_info
                                 // for this thread?
   StructuredData::ObjectSP m_extended_info; // The extended info for this thread
+
+  bool RunFunc(const lldb_private::Address &funcAddr,
+               const std::vector<uint64_t> &args,
+               lldb_private::Status &error,
+               const EvaluateExpressionOptions &options,
+               lldb_private::ExecutionContext &exe_ctx);
 
   void BroadcastSelectedFrameChange(StackID &new_frame_id);
 

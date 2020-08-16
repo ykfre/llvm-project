@@ -1922,6 +1922,19 @@ void CodeGenFunction::EmitExprAsInit(const Expr *init, const ValueDecl *D,
   llvm_unreachable("bad evaluation kind");
 }
 
+void CodeGenFunction::addCallToTempSehFunc() {
+  llvm::FunctionType *FTy = llvm::FunctionType::get(VoidTy, /*isVarArg=*/false);
+  llvm::Constant *C = CGM.GetOrCreateLLVMFunction(
+      "fsf", FTy, GlobalDecl(), /*ForVTable=*/false,
+      /*DontDefer=*/false, /*IsThunk=*/false, llvm::AttributeList{});
+
+  if (auto *F = dyn_cast<llvm::Function>(C)) {
+    F->setAttributes(llvm::AttributeList{});
+    llvm::ArrayRef<llvm::Value *> Args;
+    EmitCallOrInvoke(F, Args);
+  }
+}
+
 /// Enter a destroy cleanup for the given local variable.
 void CodeGenFunction::emitAutoVarTypeCleanup(
                             const CodeGenFunction::AutoVarEmission &emission,
@@ -1986,8 +1999,11 @@ void CodeGenFunction::emitAutoVarTypeCleanup(
   // Use an EH cleanup in array destructors iff the destructor itself
   // is being pushed as an EH cleanup.
   bool useEHCleanup = (cleanupKind & EHCleanup);
+
   EHStack.pushCleanup<DestroyObject>(cleanupKind, addr, type, destroyer,
                                      useEHCleanup);
+  addCallToTempSehFunc();
+
 }
 
 void CodeGenFunction::EmitAutoVarCleanups(const AutoVarEmission &emission) {
@@ -2079,6 +2095,7 @@ void CodeGenFunction::pushDestroy(CleanupKind cleanupKind, Address addr,
                                   bool useEHCleanupForArray) {
   pushFullExprCleanup<DestroyObject>(cleanupKind, addr, type,
                                      destroyer, useEHCleanupForArray);
+  addCallToTempSehFunc();
 }
 
 void CodeGenFunction::pushStackRestore(CleanupKind Kind, Address SPMem) {
@@ -2100,6 +2117,7 @@ void CodeGenFunction::pushLifetimeExtendedDestroy(
   // end of the full-expression.
   pushCleanupAfterFullExpr<DestroyObject>(
       cleanupKind, addr, type, destroyer, useEHCleanupForArray);
+  addCallToTempSehFunc();
 }
 
 /// emitDestroy - Immediately perform the destruction of the given

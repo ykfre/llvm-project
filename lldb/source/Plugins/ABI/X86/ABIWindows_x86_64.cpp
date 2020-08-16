@@ -201,6 +201,18 @@ bool ABIWindows_x86_64::PrepareTrivialCall(Thread &thread, addr_t sp,
   return true;
 }
 
+bool ABIWindows_x86_64::PrepareTrivialCall(
+    lldb_private::Thread &thread, lldb::addr_t sp, lldb::addr_t functionAddress,
+    lldb::addr_t returnAddress, llvm::Type &prototype,
+    llvm::ArrayRef<CallArgument> args) const {
+  std::vector<addr_t> raw_args;
+  for (const auto& arg: args) {
+    raw_args.push_back(arg.value);
+  }
+  llvm::ArrayRef<addr_t> arrayRefArgs(raw_args.data(), raw_args.size());
+  return PrepareTrivialCall(thread, sp, functionAddress,returnAddress,arrayRefArgs);
+}
+
 static bool ReadIntegerArgument(Scalar &scalar, unsigned int bit_width,
                                 bool is_signed, Thread &thread,
                                 uint32_t *argument_register_ids,

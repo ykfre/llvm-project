@@ -5628,7 +5628,7 @@ void InitializationSequence::InitializeFrom(Sema &S,
   //   defined when the initializer is a braced-init-list or when it is a
   //   parenthesized list of expressions.
   QualType DestType = Entity.getType();
-
+  /*
   if (Entity.getDecl())
   {
 
@@ -5643,6 +5643,7 @@ void InitializationSequence::InitializeFrom(Sema &S,
                      Entity.getDecl()->getBeginLoc())
               << std::endl;
   }
+  */
 
   if (DestType->isDependentType() ||
       Expr::hasAnyTypeDependentArguments(Args)) {

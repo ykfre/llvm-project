@@ -1410,13 +1410,13 @@ public:
                                            TBAAAccessInfo *TBAAInfo = nullptr);
   bool stopAutoInit();
 
-private:
   llvm::Constant *GetOrCreateLLVMFunction(
       StringRef MangledName, llvm::Type *Ty, GlobalDecl D, bool ForVTable,
       bool DontDefer = false, bool IsThunk = false,
       llvm::AttributeList ExtraAttrs = llvm::AttributeList(),
       ForDefinition_t IsForDefinition = NotForDefinition);
 
+private:
   llvm::Constant *GetOrCreateMultiVersionResolver(GlobalDecl GD,
                                                   llvm::Type *DeclTy,
                                                   const FunctionDecl *FD);

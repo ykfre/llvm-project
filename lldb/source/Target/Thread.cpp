@@ -11,8 +11,10 @@
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/FormatEntity.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Core/Section.h"
 #include "lldb/Core/StructuredDataImpl.h"
 #include "lldb/Core/ValueObject.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Interpreter/OptionValueFileSpecList.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
@@ -31,6 +33,7 @@
 #include "lldb/Target/ThreadPlan.h"
 #include "lldb/Target/ThreadPlanBase.h"
 #include "lldb/Target/ThreadPlanCallFunction.h"
+#include "lldb/Target/ThreadPlanCallFunctionUsingABI.h"
 #include "lldb/Target/ThreadPlanPython.h"
 #include "lldb/Target/ThreadPlanRunToAddress.h"
 #include "lldb/Target/ThreadPlanStack.h"
@@ -49,9 +52,10 @@
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/lldb-enumerations.h"
-
+#include "llvm/IR/LLVMContext.h"
+#include <Windows.h>
+#include <ehdata.h>
 #include <memory>
-
 using namespace lldb;
 using namespace lldb_private;
 
@@ -73,8 +77,7 @@ enum {
 
 class ThreadOptionValueProperties : public OptionValueProperties {
 public:
-  ThreadOptionValueProperties(ConstString name)
-      : OptionValueProperties(name) {}
+  ThreadOptionValueProperties(ConstString name) : OptionValueProperties(name) {}
 
   // This constructor is used when creating ThreadOptionValueProperties when it
   // is part of a new lldb_private::Thread instance. It will copy all current
@@ -261,6 +264,58 @@ void Thread::DestroyThread() {
   m_prev_frames_sp.reset();
 }
 
+bool Thread::RunFunc(const lldb_private::Address &funcAddr,
+                     const std::vector<uint64_t> &args,
+                     lldb_private::Status &error,
+                     const EvaluateExpressionOptions &options,
+                     lldb_private::ExecutionContext &exe_ctx) {
+  llvm::LLVMContext Ctx;
+  auto *VoidTy = llvm::Type::getVoidTy(Ctx);
+  // Pack the arguments into an llvm::array
+  llvm::FunctionType *FTy = llvm::FunctionType::get(VoidTy, /*isVarArg=*/false);
+  std::vector<ABI::CallArgument> call_args;
+  for (const auto &arg : args) {
+    ABI::CallArgument call_arg;
+    call_arg.type = ABI::CallArgument::TargetValue;
+    call_arg.size = 8;
+    call_arg.value = arg;
+    call_args.push_back(std::move(call_arg));
+  }
+  // Setup a thread plan to call the target function
+  lldb::ThreadPlanSP call_plan_sp(
+      new lldb_private::ThreadPlanCallFunctionUsingABI(
+          *this, funcAddr, *FTy, *VoidTy,
+          llvm::ArrayRef<ABI::CallArgument>(call_args.data(), call_args.size()),
+          options));
+
+  // Check if the plan is valid
+  lldb_private::StreamString ss;
+  if (!call_plan_sp || !call_plan_sp->ValidatePlan(&ss)) {
+    error.SetErrorToGenericError();
+    error.SetErrorStringWithFormat(
+        "unable to make ThreadPlanCallFunctionUsingABI for 0x%llx",
+        funcAddr.GetOffset());
+    return false;
+  }
+
+  exe_ctx.GetProcessPtr()->SetRunningUserExpression(true);
+
+  lldb_private::DiagnosticManager diagnostics;
+  // Execute the actual function call thread plan
+  lldb::ExpressionResults res = exe_ctx.GetProcessRef().RunThreadPlan(
+      exe_ctx, call_plan_sp, options, diagnostics);
+
+  // Check that the thread plan completed successfully
+  if (res != lldb::ExpressionResults::eExpressionCompleted) {
+    error.SetErrorToGenericError();
+    error.SetErrorStringWithFormat("ThreadPlanCallFunctionUsingABI failed");
+    return false;
+  }
+
+  exe_ctx.GetProcessPtr()->SetRunningUserExpression(false);
+  return true;
+}
+
 void Thread::BroadcastSelectedFrameChange(StackID &new_frame_id) {
   if (EventTypeHasListeners(eBroadcastBitSelectedFrameChanged))
     BroadcastEvent(eBroadcastBitSelectedFrameChanged,
@@ -349,14 +404,14 @@ lldb::StopInfoSP Thread::GetStopInfo() {
   // from completed plan stack - m_stop_info_sp (trace stop reason is OK now) -
   // ask GetPrivateStopInfo to set stop info
 
-  bool have_valid_stop_info = m_stop_info_sp &&
-      m_stop_info_sp ->IsValid() &&
-      m_stop_info_stop_id == stop_id;
-  bool have_valid_completed_plan = completed_plan_sp && completed_plan_sp->PlanSucceeded();
+  bool have_valid_stop_info = m_stop_info_sp && m_stop_info_sp->IsValid() &&
+                              m_stop_info_stop_id == stop_id;
+  bool have_valid_completed_plan =
+      completed_plan_sp && completed_plan_sp->PlanSucceeded();
   bool plan_failed = completed_plan_sp && !completed_plan_sp->PlanSucceeded();
   bool plan_overrides_trace =
-    have_valid_stop_info && have_valid_completed_plan
-    && (m_stop_info_sp->GetStopReason() == eStopReasonTrace);
+      have_valid_stop_info && have_valid_completed_plan &&
+      (m_stop_info_sp->GetStopReason() == eStopReasonTrace);
 
   if (have_valid_stop_info && !plan_overrides_trace && !plan_failed) {
     return m_stop_info_sp;
@@ -990,7 +1045,7 @@ Vote Thread::ShouldReportStop(Event *event_ptr) {
   }
 
   if (GetPlans().AnyCompletedPlans()) {
-    // Pass skip_private = false to GetCompletedPlan, since we want to ask 
+    // Pass skip_private = false to GetCompletedPlan, since we want to ask
     // the last plan, regardless of whether it is private or not.
     LLDB_LOGF(log,
               "Thread::ShouldReportStop() tid = 0x%4.4" PRIx64
@@ -1028,7 +1083,7 @@ Vote Thread::ShouldReportRun(Event *event_ptr) {
 
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
   if (GetPlans().AnyCompletedPlans()) {
-    // Pass skip_private = false to GetCompletedPlan, since we want to ask 
+    // Pass skip_private = false to GetCompletedPlan, since we want to ask
     // the last plan, regardless of whether it is private or not.
     LLDB_LOGF(log,
               "Current Plan for thread %d(%p) (0x%4.4" PRIx64
@@ -1081,7 +1136,7 @@ void Thread::PushPlan(ThreadPlanSP thread_plan_sp) {
               static_cast<void *>(this), s.GetData(),
               thread_plan_sp->GetThread().GetID());
   }
-  
+
   GetPlans().PushPlan(std::move(thread_plan_sp));
 }
 
@@ -1099,7 +1154,7 @@ void Thread::DiscardPlan() {
   ThreadPlanSP discarded_plan_sp = GetPlans().PopPlan();
 
   LLDB_LOGF(log, "Discarding plan: \"%s\", tid = 0x%4.4" PRIx64 ".",
-            discarded_plan_sp->GetName(), 
+            discarded_plan_sp->GetName(),
             discarded_plan_sp->GetThread().GetID());
 }
 
@@ -1131,7 +1186,7 @@ bool Thread::CompletedPlanOverridesBreakpoint() const {
   return GetPlans().AnyCompletedPlans();
 }
 
-ThreadPlan *Thread::GetPreviousPlan(ThreadPlan *current_plan) const{
+ThreadPlan *Thread::GetPreviousPlan(ThreadPlan *current_plan) const {
   return GetPlans().GetPreviousPlan(current_plan);
 }
 
@@ -1220,7 +1275,7 @@ Status Thread::UnwindInnermostExpression() {
   if (!innermost_expr_plan) {
     error.SetErrorString("No expressions currently active on this thread");
     return error;
-  }  
+  }
   DiscardThreadPlansUpToPlan(innermost_expr_plan);
   return error;
 }
@@ -1368,18 +1423,18 @@ ThreadPlanSP Thread::QueueThreadPlanForStepUntil(
 }
 
 lldb::ThreadPlanSP Thread::QueueThreadPlanForStepScripted(
-    bool abort_other_plans, const char *class_name, 
-    StructuredData::ObjectSP extra_args_sp,  bool stop_other_threads,
+    bool abort_other_plans, const char *class_name,
+    StructuredData::ObjectSP extra_args_sp, bool stop_other_threads,
     Status &status) {
-    
-  StructuredDataImpl *extra_args_impl = nullptr; 
+
+  StructuredDataImpl *extra_args_impl = nullptr;
   if (extra_args_sp) {
     extra_args_impl = new StructuredDataImpl();
     extra_args_impl->SetObjectSP(extra_args_sp);
   }
 
-  ThreadPlanSP thread_plan_sp(new ThreadPlanPython(*this, class_name, 
-                                                   extra_args_impl));
+  ThreadPlanSP thread_plan_sp(
+      new ThreadPlanPython(*this, class_name, extra_args_impl));
 
   status = QueueThreadPlan(thread_plan_sp, abort_other_plans);
   return thread_plan_sp;
@@ -1437,23 +1492,152 @@ lldb::StackFrameSP Thread::GetFrameWithConcreteFrameIndex(uint32_t unwind_idx) {
   return GetStackFrameList()->GetFrameWithConcreteFrameIndex(unwind_idx);
 }
 
-Status Thread::ReturnFromFrameWithIndex(uint32_t frame_idx,
-                                        lldb::ValueObjectSP return_value_sp,
-                                        bool broadcast) {
-  StackFrameSP frame_sp = GetStackFrameAtIndex(frame_idx);
+Status Thread::ReturnFromFrameWithIndex(
+    uint32_t frame_idx, lldb::ValueObjectSP return_value_sp,
+    lldb_private::ExecutionContext &executionContext, bool broadcast) {
   Status return_error;
 
-  if (!frame_sp) {
-    return_error.SetErrorStringWithFormat(
-        "Could not find frame with index %d in thread 0x%" PRIx64 ".",
-        frame_idx, GetID());
+  for (int i = 0; i <= frame_idx; i++) {
+    StackFrameSP frame_sp = GetStackFrameAtIndex(0);
+
+    if (!frame_sp) {
+      return_error.SetErrorStringWithFormat(
+          "Could not find frame with index %d in thread 0x%" PRIx64 ".",
+          frame_idx, GetID());
+    }
+
+    return_error =
+        ReturnFromFrame(frame_sp, return_value_sp, executionContext, broadcast);
+    if (!return_error.Success()) {
+      return return_error;
+    }
+  }
+  return return_error;
+}
+
+#pragma pack(push, ehdata, 4)
+struct UnwindInfoContinue {
+  union {
+    unsigned long ExceptionHandler;
+    unsigned long FunctionEntry;
+  };
+  unsigned long ExceptionData;
+};
+
+typedef struct _s_FuncInfo2 {
+  unsigned int magicNumber : 29; // Identifies version of compiler
+  unsigned int bbtFlags : 3;     // flags that may be set by BBT processing
+  __ehstate_t maxState;          // Highest state number plus one (thus
+                                 // number of entries in unwind map)
+#if _EH_RELATIVE_FUNCINFO
+  int dispUnwindMap;       // Image relative offset of the unwind map
+  unsigned int nTryBlocks; // Number of 'try' blocks in this function
+  int dispTryBlockMap;     // Image relative offset of the handler map
+  unsigned int
+      nIPMapEntries;    // # entries in the IP-to-state map. NYI (reserved)
+  int dispIPtoStateMap; // Image relative offset of the IP to state map
+  int dispUwindHelp;    // Displacement of unwind helpers from base
+  int dispESTypeList;   // Image relative list of types for exception
+                        // specifications
+#else
+  UnwindMapEntry *pUnwindMap;     // Where the unwind map is
+  unsigned int nTryBlocks;        // Number of 'try' blocks in this function
+  TryBlockMapEntry *pTryBlockMap; // Where the handler map is
+  unsigned int
+      nIPMapEntries;       // # entries in the IP-to-state map. NYI (reserved)
+  void *pIPtoStateMap;     // An IP to state map.  NYI (reserved).
+  ESTypeList *pESTypeList; // List of types for exception specifications
+#endif
+  int EHFlags; // Flags for some features.
+} FuncInfo2;
+
+typedef struct _s_UnwindMapEntry2 {
+  __ehstate_t toState; // State this action takes us to
+#if _EH_RELATIVE_FUNCINFO
+  int action; // Image relative offset of funclet
+#else
+  void(__cdecl *action)(void); // Funclet to call to effect state change
+#endif
+} UnwindMapEntry2;
+#pragma pack(pop, ehdata)
+
+class RunTimeInfo {
+public:
+  RunTimeInfo(const std::vector<RUNTIME_FUNCTION> &RuntimeInfos, void *base);
+
+  llvm::Optional<RUNTIME_FUNCTION> findRunTime(size_t rip);
+
+private:
+  std::vector<RUNTIME_FUNCTION> m_runtimeFunctions;
+  uint32_t m_size;
+  void *m_base;
+};
+
+RunTimeInfo::RunTimeInfo(const std::vector<RUNTIME_FUNCTION> &runtimeInfos,
+                         void *base)
+    : m_runtimeFunctions(runtimeInfos), m_base(base) {}
+
+llvm::Optional<RUNTIME_FUNCTION> RunTimeInfo::findRunTime(size_t rip) {
+  rip -= (size_t)m_base;
+  for (uint32_t i = 0; i < m_runtimeFunctions.size(); i++) {
+    if (m_runtimeFunctions[i].BeginAddress <= rip &&
+        m_runtimeFunctions[i].EndAddress >= rip) {
+      return m_runtimeFunctions[i];
+    }
+  }
+  return llvm::Optional<RUNTIME_FUNCTION>();
+}
+
+llvm::Optional<RunTimeInfo> getRunTimeAddress(size_t moduleStart,
+                                              lldb_private::Process &process) {
+  IMAGE_DOS_HEADER pidh;
+  Status status;
+  process.ReadMemory(moduleStart, &pidh, sizeof(pidh), status);
+  if (!status.Success()) {
+    return llvm::Optional<RunTimeInfo>();
+  }
+  IMAGE_NT_HEADERS pinh;
+  size_t current_index = moduleStart + pidh.e_lfanew;
+  process.ReadMemory(current_index, &pinh, sizeof(pinh), status);
+  if (!status.Success()) {
+    return llvm::Optional<RunTimeInfo>();
   }
 
-  return ReturnFromFrame(frame_sp, return_value_sp, broadcast);
+  IMAGE_OPTIONAL_HEADER pioh;
+  current_index += offsetof(IMAGE_NT_HEADERS, OptionalHeader);
+  process.ReadMemory(current_index, &pioh, sizeof(IMAGE_OPTIONAL_HEADER),
+                     status);
+  if (!status.Success()) {
+    return llvm::Optional<RunTimeInfo>();
+  }
+
+  auto exceptionDirectoryRva =
+      pioh.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+
+  std::vector<RUNTIME_FUNCTION> runtimesInfos(exceptionDirectoryRva.Size /
+                                              sizeof(RUNTIME_FUNCTION));
+  process.ReadMemory(exceptionDirectoryRva.VirtualAddress + moduleStart,
+                     runtimesInfos.data(),
+                     runtimesInfos.size() * sizeof(RUNTIME_FUNCTION), status);
+  if (!status.Success()) {
+    return llvm::Optional<RunTimeInfo>();
+  }
+  return RunTimeInfo(runtimesInfos, (void *)moduleStart);
+}
+
+int findState(size_t rip, const std::vector<IptoStateMapEntry> &ipo) {
+  for (uint32_t i = 0; i < ipo.size(); i++) {
+    if ((i != ipo.size() - 1 && ipo[i].Ip <= rip && ipo[i + 1].Ip > rip) ||
+        (i == ipo.size() - 1 && ipo[i].Ip <= rip)) {
+      return ipo[i].State;
+    }
+  }
+  return -1;
 }
 
 Status Thread::ReturnFromFrame(lldb::StackFrameSP frame_sp,
                                lldb::ValueObjectSP return_value_sp,
+                               lldb_private::ExecutionContext &executionContext,
                                bool broadcast) {
   Status return_error;
 
@@ -1510,6 +1694,115 @@ Status Thread::ReturnFromFrame(lldb::StackFrameSP frame_sp,
   StackFrameSP youngest_frame_sp = thread->GetStackFrameAtIndex(0);
   if (youngest_frame_sp) {
     lldb::RegisterContextSP reg_ctx_sp(youngest_frame_sp->GetRegisterContext());
+    auto modules = executionContext.GetTargetPtr()->GetImages();
+    for (int i = 0; i < modules.GetSize(); i++) {
+
+      auto module = modules.GetModuleAtIndex(i);
+      auto objFile = module->GetObjectFile();
+      auto sections = *objFile->GetSectionList();
+      std::vector<lldb::SectionSP> sectionsList;
+      for (const auto &section : sections) {
+        sectionsList.push_back(section);
+      }
+
+      auto baseStartAddr = objFile->GetBaseAddress().GetLoadAddress(
+          executionContext.GetTargetPtr());
+      auto lastSection = sectionsList[sectionsList.size() - 1];
+      auto lastSectionAddr =
+          lastSection->GetLoadBaseAddress(executionContext.GetTargetPtr());
+
+      auto lastSectionSize = lastSection->GetByteSize();
+      if (!(baseStartAddr <= reg_ctx_sp->GetPC() &&
+            reg_ctx_sp->GetPC() < lastSectionSize + lastSectionAddr)) {
+        continue;
+      }
+
+      auto runTimeInfoTable =
+          getRunTimeAddress(baseStartAddr, *executionContext.GetProcessPtr());
+      if (!runTimeInfoTable) {
+        continue;
+      }
+      auto runTimeInfo =
+          runTimeInfoTable.getValue().findRunTime(reg_ctx_sp->GetPC());
+      if (!runTimeInfo) {
+        continue;
+      }
+      UNWIND_INFO unwindInfo;
+      executionContext.GetProcessPtr()->ReadMemory(
+          baseStartAddr + runTimeInfo->UnwindInfoAddress, &unwindInfo,
+          sizeof(unwindInfo), return_error);
+      if (!return_error.Success()) {
+        return return_error;
+      }
+      if (unwindInfo.Flags & UNW_FLAG_EHANDLER ||
+          unwindInfo.Flags & UNW_FLAG_UHANDLER) {
+        int moreCountOfCodesNum = ((unwindInfo.CountOfCodes + 1) & ~1) - 1;
+        UnwindInfoContinue unwindInfoEnd;
+        executionContext.GetProcessPtr()->ReadMemory(
+            baseStartAddr + runTimeInfo->UnwindInfoAddress +
+                +sizeof(UNWIND_INFO) +
+                moreCountOfCodesNum * sizeof(UNWIND_CODE),
+            &unwindInfoEnd, sizeof(unwindInfoEnd), return_error);
+        if (!return_error.Success()) {
+          return return_error;
+        }
+        FuncInfo2 funcInfo;
+        executionContext.GetProcessPtr()->ReadMemory(
+            baseStartAddr + unwindInfoEnd.ExceptionData, (void *)&funcInfo,
+            sizeof(funcInfo), return_error);
+        if (!return_error.Success()) {
+          return return_error;
+        }
+
+        std::vector<IptoStateMapEntry> ipoEntries(funcInfo.nIPMapEntries);
+        executionContext.GetProcessPtr()->ReadMemory(
+            baseStartAddr + funcInfo.dispIPtoStateMap,
+            (void *)ipoEntries.data(),
+            ipoEntries.size() * sizeof(IptoStateMapEntry), return_error);
+        if (!return_error.Success()) {
+          return return_error;
+        }
+        int currentState =
+            findState(reg_ctx_sp->GetPC() - baseStartAddr, ipoEntries);
+        if (-1 == currentState) {
+          Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_UNWIND));
+          LLDB_LOGF(log, "no desturctors");
+        }
+
+        if (-1 == funcInfo.maxState) {
+          Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_UNWIND));
+          LLDB_LOGF(log, "no desturctors");
+        }
+        std::vector<UnwindMapEntry2> unwindMap(funcInfo.maxState);
+        executionContext.GetProcessPtr()->ReadMemory(
+            baseStartAddr + funcInfo.dispUnwindMap, (void *)unwindMap.data(),
+            unwindMap.size() * sizeof(UnwindMapEntry2), return_error);
+        if (!return_error.Success()) {
+          return return_error;
+        }
+        while (currentState != -1 && unwindMap[currentState].action) {
+          auto funcAddr = baseStartAddr + unwindMap[currentState].action;
+          EvaluateExpressionOptions options;
+          options.SetDebug(false);
+          options.SetIgnoreBreakpoints(false);
+          options.SetUnwindOnError(false);
+          options.SetKeepInMemory(false);
+          options.SetTryAllThreads(false);
+          options.SetStopOthers(true);
+          std::vector<uint64_t> args;
+          args.push_back(0);
+          args.push_back(reg_ctx_sp->GetSP());
+          Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_UNWIND));
+          LLDB_LOGF(log, "calling desturctor %p", funcAddr);
+          if (!RunFunc(funcAddr, args, return_error, options,
+                       executionContext)) {
+            return return_error;
+          }
+          currentState = unwindMap[currentState].toState;
+        }
+      }
+    }
+
     if (reg_ctx_sp) {
       bool copy_success = reg_ctx_sp->CopyFromRegisterContext(
           older_frame_sp->GetRegisterContext());
