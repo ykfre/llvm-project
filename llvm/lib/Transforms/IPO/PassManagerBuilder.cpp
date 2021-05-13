@@ -476,12 +476,28 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
     MPM.add(createControlHeightReductionLegacyPass());
 }
 
+struct Hello : public ModulePass {
+public:
+  static char ID;
+  Hello() : ModulePass(ID) {}
+  bool runOnModule(Module &M) override {
+    for (auto &FF : M) {
+        // Check if it is destructor - for now I too lazy to check if this will fuck something if I will do it to every function.
+      if (FF.getName().contains("??1")) {
+        FF.removeFnAttr(llvm::Attribute::NoUnwind);
+      }
+    }
+    return true;
+  }
+};
+char Hello::ID = 4;
+
 void PassManagerBuilder::populateModulePassManager(
     legacy::PassManagerBase &MPM) {
   // Whether this is a default or *LTO pre-link pipeline. The FullLTO post-link
   // is handled separately, so just check this is not the ThinLTO post-link.
   bool DefaultOrPreLinkPipeline = !PerformThinLTO;
-
+  MPM.add(new Hello());
   if (!PGOSampleUse.empty()) {
     MPM.add(createPruneEHPass());
     // In ThinLTO mode, when flattened profile is used, all the available
